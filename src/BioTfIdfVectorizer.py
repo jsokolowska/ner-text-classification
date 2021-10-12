@@ -1,10 +1,10 @@
-import RepresentationInterface
+import NamedEntityVectorizer
 
 
-class BioTfIdfVectorizer(RepresentationInterface.RepresentationInterface):
-    """Biorący pod uwagę rodzaje nazw własnych i liczący oddzielnie wartości tf-idf
-    dla słów i dla tagów - tj. traktujący zarówno słowa jak i tagi BIO jako termy,
-    dla których wyliczana jest wartość tf-idf. Być może będzie to wymagało wykluczenia
-    z takiej reprezentacji tagów 'O', ze względu na ich częstość występowania,
-    ale to prawdopodobnie należy zweryfikować w praktyce."""
+class BioTfIdfVectorizer(RepresentationInterface.NamedEntityVectorizer):
+    """Tf-idf based vectorization in which words as well as their BIO tags
+    are considered to be terms. May need excluding 'O' tag in order to eliminate redundant information.
+    Gives information about frequency of term occurences and also of named entities occurences and types of
+    named entities
+    """
     pass
