@@ -1,4 +1,4 @@
-import NamedEntityVectorizer
+import ner_vectorizer
 
 
 class PosBioTfIdfVectorizer(RepresentationInterface.NamedEntityVectorizer):
