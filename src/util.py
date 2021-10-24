@@ -13,17 +13,17 @@ TextData = (List[LabelledSentence], List[str])
 
 class TextGetter:
     def __init__(self, /, labelled_sentences: List[LabelledSentence] = None, sentences: TokenList = None,
-                 tokens: TokenList = None,
+                 bio_tags: TokenList = None,
                  tags: Set[str] = None):
         if labelled_sentences:
             self.labelled_sentences = labelled_sentences
-            self.tags = [[tag for _, tag in labelled_sentence] for labelled_sentence in labelled_sentences]
+            self.bio_tags = [[tag for _, tag in labelled_sentence] for labelled_sentence in labelled_sentences]
             self.sentences = [[word for word, _ in labelled_sentence] for labelled_sentence in labelled_sentences]
-        elif sentences and tokens:
+        elif sentences and bio_tags:
             self.labelled_sentences = [[(word, tag) for word, tag in zip(sentence, labels)] for sentence, labels in
-                                       zip(sentences, tags)]
-            self.tags = tags
+                                       zip(sentences, bio_tags)]
             self.sentences = sentences
+            self.bio_tags = bio_tags
         else:
             raise ValueError(
                 "Either labelled_sentences or sentences and tokens must be provided"
@@ -32,7 +32,7 @@ class TextGetter:
             self.tags = tags
         else:
             self.tags = set()
-            for tag_list in self.tags:
+            for tag_list in self.bio_tags:
                 self.tags.update(tag_list)
 
 
@@ -56,7 +56,7 @@ def data_split(data: TextGetter) -> (TextGetter, TextGetter):
     sentences = data.sentences
     tags = data.sentences
     train_s, test_s, train_l, test_l = train_test_split(sentences, tags)
-    return TextGetter(sentences=train_s, tokens=train_l), TextGetter(sentences=test_s, tokens = test_l)
+    return TextGetter(sentences=train_s, bio_tags=train_l), TextGetter(sentences=test_s, bio_tags= test_l)
 
 
 def save(filepath: str, labelled_sentences: List[LabelledSentence] = None, sentences: TokenList = None,
@@ -107,4 +107,4 @@ def load_preprocessed(data_dir: str) -> (TextGetter, TextGetter):
         for sentence, labels in reader:
             test_sentences.append(sentence)
             test_labels.append(labels)
-    return TextGetter(sentences= train_sentences, labels = train_labels), TextGetter(sentences = test_sentences, labels = test_labels)
+    return TextGetter(sentences= train_sentences, bio_tags = train_labels), TextGetter(sentences = test_sentences, bio_tags = test_labels)

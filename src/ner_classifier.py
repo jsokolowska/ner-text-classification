@@ -2,10 +2,11 @@ from abc import ABC, abstractmethod
 from typing import List, Tuple, Iterable
 
 import spacy
-from spacy.util import minibatch, compounding
-from tqdm import tqdm, trange
+from spacy.util import minibatch
+from tqdm import tqdm
 from spacy.training import Example
 from spacy.tokens import Doc
+from util import load_kaggle_ner, TextGetter
 import random
 
 __all__ = ["NamedEntityClassifier", "SpacyNEClassifier"]
@@ -29,12 +30,9 @@ class NamedEntityClassifier(ABC):
         pass
 
     @abstractmethod
-    def predict(self, test_data: List[List[str]]) -> List[List[Tuple[str, str]]]:
+    def predict(self, test_data: List[List[str]]) -> TextGetter:
         pass
 
-
-# todo add some interface implementations based on spacy or bert
-# todo add some loader for known ner classifiers
 
 class SpacyNEClassifier(NamedEntityClassifier):
     """
@@ -69,7 +67,9 @@ class SpacyNEClassifier(NamedEntityClassifier):
 
     def _load_from_file(self, filepath: str):
         self.nlp = spacy.blank('en')
+        self.nlp.add_pipe('ner')
         self.nlp.from_disk(filepath)
+        self.ner = self.nlp.get_pipe('ner')
 
     def _load_from_library(self):
         self.nlp = spacy.blank('en')
@@ -93,7 +93,7 @@ class SpacyNEClassifier(NamedEntityClassifier):
                     self.nlp.update(batch, sgd=optimizer, losses=loss)
                     self.losses.append(loss['ner'])
 
-    def predict(self, test_data: List[List[str]]) -> List[List[Tuple[str, str]]]:
+    def predict(self, test_data: List[List[str]]) -> TextGetter:
         test_docs = self._make_doc_test(test_data)
 
         scores = self.ner.predict(test_docs)
@@ -137,8 +137,21 @@ def _to_spacy_format(labeled_sentences: List[List[Tuple[str, str]]]):
     return json_data
 
 
-def _from_spacy_format(processed_examples: Iterable[Doc]) -> List[List[Tuple[str, str]]]:
-    #todo figure out how to re-jsonize it
+def _from_spacy_format(processed_examples: Iterable[Doc]) -> TextGetter:
+    sentences = []
+    tags = []
     for elem in processed_examples:
-        elem.text()
-    pass
+        tokenized = elem.text_with_ws.split(" ")
+        bio_tags = ['O' for i in range(len(tokenized))]
+        for entity in elem.ents:
+            for idx in range(entity.start, entity.end):
+                bio_tags[idx] = entity.label_
+
+        sentences.append(tokenized)
+        tags.append(bio_tags)
+    return TextGetter(sentences=sentences, bio_tags=tags)
+
+
+text = load_kaggle_ner("../preprocessed_data/kaggle-ner/test.csv")
+classifier = SpacyNEClassifier(filepath="../pretrained_models/spacy-trained-kaggle-ner")
+after = classifier.predict(text.sentences[:10])
