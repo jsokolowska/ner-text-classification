@@ -6,14 +6,13 @@ from spacy.util import minibatch
 from tqdm import tqdm
 from spacy.training import Example
 from spacy.tokens import Doc
-from util import load_kaggle_ner, TextGetter
+from util import TextGetter
 import random
 
 __all__ = ["NamedEntityClassifier", "SpacyNEClassifier"]
 
 
 class NamedEntityClassifier(ABC):
-    # todo fill in that interface with methods
     def __init__(self):
         pass
 
@@ -35,16 +34,6 @@ class NamedEntityClassifier(ABC):
 
 
 class SpacyNEClassifier(NamedEntityClassifier):
-    """
-
-    Parameters
-    -----
-    filepath: str
-        Path to file containing pretrained model
-    train_data: list[list[tuple(str, str)]]
-        Iterable yielding iterables of tuples (word, ner tag)
-    """
-
     def __init__(self, filepath: str = None, train_data: List[List[Tuple[str, str]]] = None):
         """
 
@@ -150,8 +139,3 @@ def _from_spacy_format(processed_examples: Iterable[Doc]) -> TextGetter:
         sentences.append(tokenized)
         tags.append(bio_tags)
     return TextGetter(sentences=sentences, bio_tags=tags)
-
-
-text = load_kaggle_ner("../preprocessed_data/kaggle-ner/test.csv")
-classifier = SpacyNEClassifier(filepath="../pretrained_models/spacy-trained-kaggle-ner")
-after = classifier.predict(text.sentences[:10])

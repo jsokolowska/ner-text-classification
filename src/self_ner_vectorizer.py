@@ -1,21 +1,20 @@
 from nltk.tokenize import word_tokenize
-from string import punctuation
 from nltk.corpus import wordnet
 from nltk.tag import pos_tag
 from nltk.stem import WordNetLemmatizer
-import warnings
-from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS, TfidfVectorizer
-import numpy as np
-import contractions
+from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS
+from string import punctuation
 from frozenlist import FrozenList
-
-__all__ = ["DoubleTfIdfVectorizer"]
-
-from ner_classifier import NamedEntityClassifier
 from abc import ABC, abstractmethod
 from typing import List, Iterable, Dict, Tuple
-from util import TextGetter
 from collections import defaultdict
+import numpy as np
+import contractions
+
+from util import TextGetter
+from ner_classifier import NamedEntityClassifier
+
+__all__ = ["DoubleTfIdfVectorizer"]
 
 
 class NamedEntityVectorizer(ABC):
@@ -181,7 +180,7 @@ class DoubleTfIdfVectorizer(NamedEntityVectorizer):
         Number of iterations to pass to ner_classifier if tune_classifier was set to true
         :returns fitted vectorizer
         """
-        self.__validate_params(raw_documents, preprocessed_text)
+        self._validate_params(raw_documents, preprocessed_text)
         self._text_getter = preprocessed_text
         self.n_iter = n_iter
 
@@ -192,17 +191,16 @@ class DoubleTfIdfVectorizer(NamedEntityVectorizer):
             self.documents = preprocessed_text.sentences
             if self.tune_ner:
                 self._tune_classifier()
-            self._bio_tags = preprocessed_text.tags
+            self._bio_tags = preprocessed_text.bio_tags
             self._tokenized = preprocessed_text.sentences
 
-        self.__preprocess()
-        self.__count_df()
+        self._preprocess()
+        self._count_df()
         self._narrow_down_vocab()
         self._invert_df()
         return self
 
-    # todo add bio tag handling
-    def transform(self, raw_documents: Iterable[str],
+    def transform(self, raw_documents: Iterable[str] = None,
                   preprocessed_text: TextGetter = None) -> np.ndarray:  # returns array-like
         """
         Transform documents into double tf-idf representation using idf scores learned from fit method.
@@ -214,19 +212,25 @@ class DoubleTfIdfVectorizer(NamedEntityVectorizer):
         """
         if not self.is_fitted():
             raise ValueError("Cannot transform text, vectorizer has not been fitted")
+        if raw_documents:
+            self.documents = raw_documents
+            self.tokenize_and_tag(raw_documents)
+        elif preprocessed_text:
+            self._text_getter = preprocessed_text
+            self._bio_tags = preprocessed_text.bio_tags
+            self._tokenized = preprocessed_text.sentences
 
-        self.tokenize_and_tag(raw_documents)
-        self.__preprocess()
-        self.__calculate_tf_idf()
+        self._preprocess()
+        self._calculate_tf_idf()
         return self.tfidf
 
-    def __validate_params(self, raw_documents, preprocessed_text):
+    def _validate_params(self, raw_documents, preprocessed_text):
         if not preprocessed_text and self.tune_ner:
             raise ValueError("Bio tags must be provided to do classificator tuning")
         if not raw_documents and not preprocessed_text:
             raise ValueError("Either raw documents or preprocessed_text must be provided")
 
-    def __preprocess(self):
+    def _preprocess(self):
         if self.filter_stopwords:
             sentences, bio_tags = self._filter_stopwords()
         else:
@@ -237,11 +241,11 @@ class DoubleTfIdfVectorizer(NamedEntityVectorizer):
             lemmatized = [self._lemmatize(doc) for doc in pos_tagged]
         else:
             lemmatized = [[word for word, _ in doc] for doc in pos_tagged]
-        self.__preprocessed = [[(word, bio) for word, bio in zip(sentence, bio_tags)] for sentence, bio_tags in
+        self._preprocessed = [[(word, bio) for word, bio in zip(sentence, bio_tags)] for sentence, bio_tags in
                                zip(lemmatized, bio_tags)]
 
-    def __count_df(self):
-        for sentence in self.__preprocessed:
+    def _count_df(self):
+        for sentence in self._preprocessed:
             words = set()
             for word, tag in sentence:
                 if tag != "O":
@@ -250,14 +254,14 @@ class DoubleTfIdfVectorizer(NamedEntityVectorizer):
             for word in words:
                 self._idf[word] += 1
 
-    def __calculate_tf_idf(self):
+    def _calculate_tf_idf(self):
         vocab_size = len(self._idf)
-        doc_num = len(self.__preprocessed)
+        doc_num = len(self._preprocessed)
         self.tfidf = np.zeros((doc_num, vocab_size))
         self.feature_names = [key for key, _ in self._idf.items()]
         self.feature_names.sort()
         for i in range(0, doc_num):
-            for word, tag in self.__preprocessed[i]:
+            for word, tag in self._preprocessed[i]:
                 if tag != "O":
                     key = word + "_NE"
                     if key in self.feature_names:
@@ -266,7 +270,7 @@ class DoubleTfIdfVectorizer(NamedEntityVectorizer):
                 if word in self.feature_names:
                     col_num = self.feature_names.index(word)
                     self.tfidf[i, col_num] += 1
-            self.tfidf[i, :] /= len(self.__preprocessed[i])
+            self.tfidf[i, :] /= len(self._preprocessed[i])
 
         for col_num in range(0, vocab_size):
             feature_name = self.feature_names[col_num]
@@ -275,20 +279,64 @@ class DoubleTfIdfVectorizer(NamedEntityVectorizer):
         if self.norm:
             self.tfidf = _normalize(self.tfidf)
 
-# documents = ['Topic sentences aren\'t similar to mini thesis statements.',
-#              'Like a thesis statement, a topic sentence has a specific \
-#               main point.']
-# stopwords_for_sklearn = list(ENGLISH_STOP_WORDS) + list(punctuation)
-#
-# vect = DoubleTfIdfVectorizer()
-# res = vect.fit(raw_documents=documents)
-#
-# tf_idf = vect.transform(raw_documents=documents)
-# tfvect_sklearn = TfidfVectorizer(stop_words=stopwords_for_sklearn)
-# transformed = tfvect_sklearn.fit_transform(raw_documents=documents).toarray()
-# print(tf_idf[0])
-# print(vect.feature_names)
-# print(vect.get_params())
-#
-# print(transformed[0])
-# print(tfvect_sklearn.get_feature_names())
+
+class BioTfIdfVectorizer(DoubleTfIdfVectorizer):
+    def __init__(self, ner_classifier: NamedEntityClassifier = None, max_df=1.0, min_df=1,
+                 tune_classifier: bool = False, filter_stopwords: bool = True, lemmatize: bool = True,
+                 normalize: bool = True):
+        """
+        :param max_df
+        int or float, ignore words that have higher document
+        frequency, if float between 0.0 and 1.0 then it refers to the proportion of documents, if integer - to
+        document count
+        :param min_df
+        int or float, ignore words that have lower document frequency, if float between
+        0.0 and 1.0 then it refers to the proportion of documents, if integer - to document count
+        :param tune_classifier
+        bool, If true then underlying ner classifier will be tuned using provided tags. Can be only set to true
+        if preprocessed_text is provided
+        :param filter_stopwords
+        bool, defaults to true, if false then stopwords won't be filtered
+        :param lemmatize
+        bool, defaults to true, when true lemmatization with wordnet is performed before calculating tf-idf r
+        epresentation
+        :param ner_classifier:
+        named entity classifier that will be used for bio tags prediction if none are provided in fit and transform
+        methods
+        """
+        super().__init__(ner_classifier, max_df, min_df, tune_classifier, filter_stopwords, lemmatize, normalize)
+        self.tfidf = None
+
+    def _count_df(self):
+        for sentence in self._preprocessed:
+            words = set()
+            for word, tag in sentence:
+                if tag != "O":
+                    words.add(tag)
+                words.add(word)
+            for word in words:
+                self._idf[word] += 1
+
+    def _calculate_tf_idf(self):
+        vocab_size = len(self._idf)
+        doc_num = len(self._preprocessed)
+        self.tfidf = np.zeros((doc_num, vocab_size))
+        self.feature_names = [key for key, _ in self._idf.items()]
+        self.feature_names.sort()
+        for i in range(0, doc_num):
+            for word, tag in self._preprocessed[i]:
+                if tag != "O":
+                    if tag in self.feature_names:
+                        col_num = self.feature_names.index(tag)
+                        self.tfidf[i, col_num] += 1
+                if word in self.feature_names:
+                    col_num = self.feature_names.index(word)
+                    self.tfidf[i, col_num] += 1
+            self.tfidf[i, :] /= len(self._preprocessed[i]) + len([tag for _, tag in self._preprocessed[i] if tag != "O"])
+
+        for col_num in range(0, vocab_size):
+            feature_name = self.feature_names[col_num]
+            idf_score = self._idf[feature_name]
+            self.tfidf[:, col_num] *= idf_score
+        if self.norm:
+            self.tfidf = _normalize(self.tfidf)

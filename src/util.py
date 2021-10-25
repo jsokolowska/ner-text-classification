@@ -56,7 +56,7 @@ def data_split(data: TextGetter) -> (TextGetter, TextGetter):
     sentences = data.sentences
     tags = data.sentences
     train_s, test_s, train_l, test_l = train_test_split(sentences, tags)
-    return TextGetter(sentences=train_s, bio_tags=train_l), TextGetter(sentences=test_s, bio_tags= test_l)
+    return TextGetter(sentences=train_s, bio_tags=train_l), TextGetter(sentences=test_s, bio_tags=test_l)
 
 
 def save(filepath: str, labelled_sentences: List[LabelledSentence] = None, sentences: TokenList = None,
@@ -90,7 +90,6 @@ def save(filepath: str, labelled_sentences: List[LabelledSentence] = None, sente
         raise ValueError("Either labelled_sentences or text_getter or sentences and labels must be provided")
 
 
-# todo maybe read and save that data with pandas
 def load_preprocessed(data_dir: str) -> (TextGetter, TextGetter):
     train_sentences = []
     train_labels = []
@@ -107,4 +106,5 @@ def load_preprocessed(data_dir: str) -> (TextGetter, TextGetter):
         for sentence, labels in reader:
             test_sentences.append(sentence)
             test_labels.append(labels)
-    return TextGetter(sentences= train_sentences, bio_tags = train_labels), TextGetter(sentences = test_sentences, bio_tags = test_labels)
+    return TextGetter(sentences=train_sentences, bio_tags=train_labels), TextGetter(sentences=test_sentences,
+                                                                                    bio_tags=test_labels)
