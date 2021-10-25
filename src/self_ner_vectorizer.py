@@ -143,6 +143,21 @@ def _tokenize(document):
 
 
 class DoubleTfIdfVectorizer(NamedEntityVectorizer):
+    """
+    Text vectorizer built on top of tf-idf implementation.
+    Data preprocessing steps:
+        - removing contractions
+        - tokenizing
+        - predicting bio tags with user-provided ner_classifier
+        - filtering stopwords and punctuation tokens
+        - pos tagging
+        - lemmatization
+    Computing tf-idf scores:
+    Each term can have a maximum of two tf-idf values. One for all term occurences in which it is a part of any type
+    of named entity and one for all the other term occurences. Tf-idf scores are computed with formula used by
+    TfidfVectorizer from sci-kit learn in order to avoid zero division. Tf-idf vectors are then normalized with
+    euclidean norm.
+    """
     def __init__(self, ner_classifier: NamedEntityClassifier = None, max_df=1.0, min_df=1,
                  tune_classifier: bool = False, filter_stopwords: bool = True, lemmatize: bool = True,
                  normalize: bool = True):
@@ -281,6 +296,19 @@ class DoubleTfIdfVectorizer(NamedEntityVectorizer):
 
 
 class BioTfIdfVectorizer(DoubleTfIdfVectorizer):
+    """
+    Text vectorizer built on top of tf-idf implementation.
+    Data preprocessing steps:
+        - removing contractions
+        - tokenizing
+        - predicting bio tags with user-provided ner_classifier
+        - filtering stopwords and punctuation tokens
+        - pos tagging
+        - lemmatization
+    Computing tf-idf scores:
+    All tokens and all tag (with the exception of tag 'O') are considered to be terms. Thus resulting implementation
+    gives information about frequency of lemmas but also how frequent are respective types of named entities.
+    """
     def __init__(self, ner_classifier: NamedEntityClassifier = None, max_df=1.0, min_df=1,
                  tune_classifier: bool = False, filter_stopwords: bool = True, lemmatize: bool = True,
                  normalize: bool = True):
@@ -326,8 +354,9 @@ class BioTfIdfVectorizer(DoubleTfIdfVectorizer):
         for i in range(0, doc_num):
             for word, tag in self._preprocessed[i]:
                 if tag != "O":
-                    if tag in self.feature_names:
-                        col_num = self.feature_names.index(tag)
+                    key = tag[2:]
+                    if key in self.feature_names:
+                        col_num = self.feature_names.index(key)
                         self.tfidf[i, col_num] += 1
                 if word in self.feature_names:
                     col_num = self.feature_names.index(word)
@@ -340,3 +369,4 @@ class BioTfIdfVectorizer(DoubleTfIdfVectorizer):
             self.tfidf[:, col_num] *= idf_score
         if self.norm:
             self.tfidf = _normalize(self.tfidf)
+
