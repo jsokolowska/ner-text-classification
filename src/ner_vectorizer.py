@@ -12,7 +12,7 @@ import numpy as np
 import contractions
 
 from util import TextGetter
-from ner_classifier import NamedEntityClassifier
+from ner_classifier import NamedEntityClassifier, SpacyNEClassifier
 
 __all__ = ["DoubleTfIdfVectorizer"]
 
@@ -118,6 +118,9 @@ class NamedEntityVectorizer(ABC):
 def _normalize(tfidf: np.ndarray) -> np.ndarray:
     vect_norms = np.sqrt(np.sum(tfidf ** 2, axis=1))
     vect_norms = vect_norms.reshape((vect_norms.shape[0], 1))
+    if np.count_nonzero(vect_norms) != vect_norms.shape[0]:
+        # prevent zero division when normalizing
+        vect_norms[vect_norms == 0] = 1
     return tfidf / vect_norms
 
 
@@ -158,6 +161,7 @@ class DoubleTfIdfVectorizer(NamedEntityVectorizer):
     TfidfVectorizer from sci-kit learn in order to avoid zero division. Tf-idf vectors are then normalized with
     euclidean norm.
     """
+
     def __init__(self, ner_classifier: NamedEntityClassifier = None, max_df=1.0, min_df=1,
                  tune_classifier: bool = False, filter_stopwords: bool = True, lemmatize: bool = True,
                  normalize: bool = True):
@@ -184,7 +188,8 @@ class DoubleTfIdfVectorizer(NamedEntityVectorizer):
         super().__init__(ner_classifier, max_df, min_df, tune_classifier, filter_stopwords, lemmatize, normalize)
         self.tfidf = None
 
-    def fit(self, raw_documents: Iterable[str] = None, preprocessed_text: TextGetter = None, n_iter: int = 10) -> NamedEntityVectorizer:
+    def fit(self, raw_documents: Iterable[str] = None, preprocessed_text: TextGetter = None,
+            n_iter: int = 10) -> NamedEntityVectorizer:
         """Calculate idf frequencies of words and optionally tune underlying ner classifier
 
         :param raw_documents
@@ -257,7 +262,7 @@ class DoubleTfIdfVectorizer(NamedEntityVectorizer):
         else:
             lemmatized = [[word for word, _ in doc] for doc in pos_tagged]
         self._preprocessed = [[(word, bio) for word, bio in zip(sentence, bio_tags)] for sentence, bio_tags in
-                               zip(lemmatized, bio_tags)]
+                              zip(lemmatized, bio_tags)]
 
     def _count_df(self):
         for sentence in self._preprocessed:
@@ -309,7 +314,8 @@ class BioTfIdfVectorizer(DoubleTfIdfVectorizer):
     All tokens and all tag (with the exception of tag 'O') are considered to be terms. Thus resulting implementation
     gives information about frequency of lemmas but also how frequent are respective types of named entities.
     """
-    def __init__(self, ner_classifier: NamedEntityClassifier = None, max_df=1.0, min_df=1,
+
+    def __init__(self, ner_classifier: NamedEntityClassifier = None, max_df: float=1.0, min_df: float=1,
                  tune_classifier: bool = False, filter_stopwords: bool = True, lemmatize: bool = True,
                  normalize: bool = True):
         """
@@ -361,7 +367,8 @@ class BioTfIdfVectorizer(DoubleTfIdfVectorizer):
                 if word in self.feature_names:
                     col_num = self.feature_names.index(word)
                     self.tfidf[i, col_num] += 1
-            self.tfidf[i, :] /= len(self._preprocessed[i]) + len([tag for _, tag in self._preprocessed[i] if tag != "O"])
+            self.tfidf[i, :] /= len(self._preprocessed[i]) + len(
+                [tag for _, tag in self._preprocessed[i] if tag != "O"])
 
         for col_num in range(0, vocab_size):
             feature_name = self.feature_names[col_num]
@@ -369,4 +376,3 @@ class BioTfIdfVectorizer(DoubleTfIdfVectorizer):
             self.tfidf[:, col_num] *= idf_score
         if self.norm:
             self.tfidf = _normalize(self.tfidf)
-
