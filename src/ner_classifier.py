@@ -1,12 +1,12 @@
 from abc import ABC, abstractmethod
 from typing import List, Tuple, Iterable
 
+import pandas as pd
 import spacy
 from spacy.util import minibatch
 from tqdm import tqdm
 from spacy.training import Example
 from spacy.tokens import Doc
-from util import TextGetter
 import random
 
 __all__ = ["NamedEntityClassifier", "SpacyNEClassifier"]
@@ -29,12 +29,12 @@ class NamedEntityClassifier(ABC):
         pass
 
     @abstractmethod
-    def predict(self, test_data: List[List[str]]) -> TextGetter:
+    def predict(self, test_data: List[List[str]], raw_data:Iterable[str]):
         pass
 
 
 class SpacyNEClassifier(NamedEntityClassifier):
-    def __init__(self, filepath: str = None, train_data: List[List[Tuple[str, str]]] = None):
+    def __init__(self, filepath: str = None):
         """
 
         Parameters
@@ -47,7 +47,6 @@ class SpacyNEClassifier(NamedEntityClassifier):
         super().__init__()
         self.reformatted_data = None
         self.losses = []
-        self.train_data = train_data
         self.ner = None
         if filepath is not None:
             self._load_from_file(filepath)
@@ -65,6 +64,7 @@ class SpacyNEClassifier(NamedEntityClassifier):
         self.nlp.add_pipe('ner')
         self.ner = self.nlp.get_pipe('ner')
 
+    # todo redo for df
     def train(self, train_data: List[List[Tuple[str, str]]], tags: List[str], n_iter: int):
         self.reformatted_data = _to_spacy_format(train_data)
         self._add_tags(tags)
@@ -82,8 +82,8 @@ class SpacyNEClassifier(NamedEntityClassifier):
                     self.nlp.update(batch, sgd=optimizer, losses=loss)
                     self.losses.append(loss['ner'])
 
-    def predict(self, test_data: List[List[str]]) -> TextGetter:
-        test_docs = self._make_doc_test(test_data)
+    def predict(self, test_data: List[List[str]] = None, raw_data: Iterable[str] = None):
+        test_docs = self._make_doc_test(test_data, raw_data)
 
         scores = self.ner.predict(test_docs)
         self.ner.set_annotations(test_docs, scores)
@@ -99,8 +99,13 @@ class SpacyNEClassifier(NamedEntityClassifier):
             examples.append(Example.from_dict(doc, annotation))
         return examples
 
-    def _make_doc_test(self, test_data: List[List[str]]) -> Iterable[Doc]:
-        return [self.nlp.make_doc(" ".join(words)) for words in test_data]
+    def _make_doc_test(self, test_data: List[List[str]] = None, raw_data: Iterable[str] = None) -> Iterable[Doc]:
+        if test_data is not None:
+            return [self.nlp.make_doc(" ".join(words)) for words in test_data]
+        elif raw_data is not None:
+            return [self.nlp.make_doc(document) for document in raw_data]
+        else:
+            raise TypeError("No test_data or raw_data provided")
 
     def _add_tags(self, tags: List[str]):
         self.tags = tags
@@ -126,16 +131,24 @@ def _to_spacy_format(labeled_sentences: List[List[Tuple[str, str]]]):
     return json_data
 
 
-def _from_spacy_format(processed_examples: Iterable[Doc]) -> TextGetter:
+def _from_spacy_format(processed_examples: Iterable[Doc]) -> pd.DataFrame:
     sentences = []
     tags = []
     for elem in processed_examples:
-        tokenized = elem.text_with_ws.split(" ")
-        bio_tags = ['O' for i in range(len(tokenized))]
+        tokens = [token for token in elem]
+        labels = ['0' for i in range(len(tokens))]
         for entity in elem.ents:
             for idx in range(entity.start, entity.end):
-                bio_tags[idx] = entity.label_
+                labels[idx]= entity.label_
 
-        sentences.append(tokenized)
-        tags.append(bio_tags)
-    return TextGetter(sentences=sentences, bio_tags=tags)
+        sentences.append(tokens)
+        tags.append(labels)
+    return pd.DataFrame({"tokens": sentences, "tags": tags})
+
+
+if __name__ == "__main__":
+    df = pd.read_csv("../preprocessed_data/bbc/whole_raw.csv")
+
+    ner = SpacyNEClassifier(filepath = "../pretrained_models/kaggle-ner-train-spacy")
+    res = ner.predict(raw_data=df["raw_text"][:10])
+    print(res.labelled_sentences)
