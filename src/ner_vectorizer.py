@@ -4,20 +4,15 @@ from nltk.tag import pos_tag
 from nltk.stem import WordNetLemmatizer
 from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS
 from string import punctuation
-from frozenlist import FrozenList
 from abc import ABC, abstractmethod
-from typing import List, Iterable, Dict, Tuple
-from collections import defaultdict
+from typing import Iterable, Dict
 import numpy as np
 import pandas as pd
 import contractions
 
-from util import TextGetter
-from ner_classifier import NamedEntityClassifier, SpacyNEClassifier
+from ner_classifier import NamedEntityClassifier
 
 __all__ = ["DoubleTfIdfVectorizer"]
-
-TokenList = Iterable[Iterable[str]]
 
 
 class NamedEntityVectorizer(ABC):
@@ -25,7 +20,8 @@ class NamedEntityVectorizer(ABC):
 
     def __init__(self, ner_classifier: NamedEntityClassifier = None, max_df=1.0, min_df=1,
                  tune_classifier: bool = False, filter_stopwords: bool = True, lemmatize: bool = True,
-                 normalize: bool = True):
+                 normalize: bool = True, filter_punctuation: bool = True, filter_whitespaces: bool = True,
+                 lower: bool = True):
 
         self._idf = None
         self._token_count = None
@@ -42,6 +38,9 @@ class NamedEntityVectorizer(ABC):
         self._tokenized = []
         self._preprocessed = []
         self.filter_stopwords = filter_stopwords
+        self.filter_punctuation = filter_punctuation
+        self.lower = lower
+        self.filter_whitespaces = filter_whitespaces
         self.lemmatize = lemmatize
         self.norm = normalize
         self.tune_ner = tune_classifier
@@ -50,16 +49,19 @@ class NamedEntityVectorizer(ABC):
         self.n_iter = 10
 
     @abstractmethod
-    def fit(self, raw_documents: Iterable[str] = None, preprocessed_text: TextGetter = None, n_iter: int = 10):
+    def fit(self, raw_documents: Iterable[str] = None, tokenized: pd.Series = None, bio_tags: pd.Series = None,
+            n_iter: int = 10):
         pass
 
     @abstractmethod
-    def transform(self, raw_documents: Iterable[str],
-                  preprocessed_text: TextGetter = None) -> np.ndarray:  # returns array-like
+    def transform(self, raw_documents: Iterable[str] = None,
+                  tokenized: pd.Series = None, bio_tags: pd.Series = None) -> pd.DataFrame:
         pass
 
-    def get_feature_names(self) -> FrozenList[str]:
-        return FrozenList(self.feature_names)
+    @abstractmethod
+    def fit_transform(self, raw_documents: Iterable[str] = None, tokenized: pd.Series = None,
+                      bio_tags: pd.Series = None, use_idf=True) -> pd.DataFrame:
+        pass
 
     def get_params(self) -> Dict[str, any]:
         params = {}
@@ -106,20 +108,32 @@ class NamedEntityVectorizer(ABC):
         # todo fit ner classifier - add niter as param
         self.ner_classifier.train(self._text_getter.labelled_sentences, self._text_getter.tags, self.n_iter)
 
-    def _filter_stopwords(self):
-        for _, row in self._df.iterrows():
-            filtered = [(word, bio) for word, bio in zip(row["Tokens"], row["Tags"]) if
-                        word not in self._STOPWORDS and word not
-                        in self._PUNCTUATION]
-            row["Tokens"] = [word for word, _ in filtered]
-            row["Tags"] = [tag for _, tag in filtered]
+    def _filter(self):
+        tokens_to_filter_out = []
+        if self.filter_punctuation:
+            tokens_to_filter_out.extend(self._PUNCTUATION)
+        if self.filter_stopwords:
+            tokens_to_filter_out.extend(list(self._STOPWORDS))
+        if self.filter_whitespaces and len(tokens_to_filter_out) > 0:
+            for _, row in self._df.iterrows():
+                filtered = [(word, bio) for word, bio in zip(row["Tokens"], row["Tags"]) if word not
+                            in tokens_to_filter_out and not word.isspace()]
+                row["Tokens"] = [word for word, _ in filtered]
+                row["Tags"] = [tag for _, tag in filtered]
+        elif self.filter_whitespaces:
+            for _, row in self._df.iterrows():
+                filtered = [(word, bio) for word, bio in zip(row["Tokens"], row["Tags"]) if not word.isspace()]
+                row["Tokens"] = [word for word, _ in filtered]
+                row["Tags"] = [tag for _, tag in filtered]
+        elif len(tokens_to_filter_out) > 0:
+            for _, row in self._df.iterrows():
+                filtered = [(word, bio) for word, bio in zip(row["Tokens"], row["Tags"]) if
+                            word not in tokens_to_filter_out]
+                row["Tokens"] = [word for word, _ in filtered]
+                row["Tags"] = [tag for _, tag in filtered]
 
-    def _lower_and_filter_punctuation(self):
-        for _, row in self._df.iterrows():
-            filtered = [(word, bio) for word, bio in zip(row["Tokens"], row["Tags"]) if word not
-                        in self._PUNCTUATION]
-            row["Tokens"] = [word.lower() for word, _ in filtered]
-            row["Tags"] = [tag for _, tag in filtered]
+    def _lower(self):
+        self._df["Tokens"] = [[word.lower() for word in row] for row in self._df["Tokens"]]
 
     def _lemmatize(self):
         for _, row in self._df.iterrows():
@@ -127,10 +141,10 @@ class NamedEntityVectorizer(ABC):
             row["Tokens"] = [self._lemmatizer.lemmatize(w, t) for w, t in pos_tagged]
 
 
-def _normalize(tfidf: pd.DataFrame) -> np.ndarray:
-    squared = tfidf**2
+def _normalize(tfidf: pd.DataFrame) -> pd.DataFrame:
+    squared = tfidf ** 2
     norms = np.sqrt(squared.sum(axis=1))
-    norms[norms == 0] = 1   # prevent zero division
+    norms[norms == 0] = 1  # prevent zero division
     return tfidf.div(norms, axis=0)
 
 
@@ -155,16 +169,24 @@ def _tokenize(document):
     return [x.lower() for x in word_tokenize(document)]
 
 
+def _strip_prefix_if_bio_tag(tag: str):
+    if tag.startswith("B-") or tag.startswith("I-"):
+        return tag[2:]
+    else:
+        return tag
+
+
 class DoubleTfIdfVectorizer(NamedEntityVectorizer):
     """
     Text vectorizer built on top of tf-idf implementation.
     Data preprocessing steps:
-        - removing contractions
-        - tokenizing
+        - removing contractions (for raw documents only)
+        - tokenizing (raw documents only)
         - predicting bio tags with user-provided ner_classifier
         - filtering stopwords and punctuation tokens
         - pos tagging
         - lemmatization
+        - filtering whitespace-only tokens
     Computing tf-idf scores:
     Each term can have a maximum of two tf-idf values. One for all term occurences in which it is a part of any type
     of named entity and one for all the other term occurences. Tf-idf scores are computed with formula used by
@@ -174,7 +196,8 @@ class DoubleTfIdfVectorizer(NamedEntityVectorizer):
 
     def __init__(self, ner_classifier: NamedEntityClassifier = None, max_df=1.0, min_df=1,
                  tune_classifier: bool = False, filter_stopwords: bool = True, lemmatize: bool = True,
-                 normalize: bool = True):
+                 normalize: bool = True, filter_punctuation: bool = True, filter_whitespaces: bool = True,
+                 lower: bool = True):
         """
         :param max_df
         int or float, ignore words that have higher document
@@ -189,13 +212,22 @@ class DoubleTfIdfVectorizer(NamedEntityVectorizer):
         :param filter_stopwords
         bool, defaults to true, if false then stopwords won't be filtered
         :param lemmatize
-        bool, defaults to true, when true lemmatization with wordnet is performed before calculating tf-idf r
-        epresentation
+        bool, defaults to true, when true lemmatization with wordnet is performed before calculating tf-idf
+        representation
         :param ner_classifier:
         named entity classifier that will be used for bio tags prediction if none are provided in fit and transform
         methods
+        :param filter_whitespaces:
+        bool, defaults to true, filters out whitespace only tokens (and associated ner tags)
+        :param filter_punctuation:
+        bool, defaults to true, filters out punctuation tokens
+        :param lower:
+        bool, defaults to true, lowers all characters in strings
+        :param normalize:
+        bool, defaults  to true, resulting tf-idf vectors will be  normalized so that their  measure is equal to one
         """
-        super().__init__(ner_classifier, max_df, min_df, tune_classifier, filter_stopwords, lemmatize, normalize)
+        super().__init__(ner_classifier, max_df, min_df, tune_classifier, filter_stopwords, lemmatize, normalize,
+                         filter_punctuation, filter_whitespaces, lower)
         self.tfidf = None
 
     def fit(self, raw_documents: Iterable[str] = None, tokenized: pd.Series = None, bio_tags: pd.Series = None,
@@ -204,8 +236,8 @@ class DoubleTfIdfVectorizer(NamedEntityVectorizer):
 
         :param raw_documents
         iterable yielding strings, representing raw, unprocessed collection of documents
-        :param preprocessed_text
-        TextGetter with tokenized sentences and BIO tags
+        :param tokenized: pd.Series, containing lists of strings (tokens)
+        :param bio_tags: pd.Series, containing lists of bio_tags
         :param n_iter
         Number of iterations to pass to ner_classifier if tune_classifier was set to true
         :returns fitted vectorizer
@@ -216,7 +248,7 @@ class DoubleTfIdfVectorizer(NamedEntityVectorizer):
         if raw_documents:
             self.corpus = raw_documents
             self.tokenize_and_tag(raw_documents)
-            # todo make it work with df
+            # todo make it work with df, don t tokenize raw documents - use spacy!
         elif tokenized is not None and bio_tags is not None:
             self._df = pd.DataFrame({"Tokens": tokenized, "Tags": bio_tags})
             self.corpus = tokenized
@@ -231,16 +263,15 @@ class DoubleTfIdfVectorizer(NamedEntityVectorizer):
         return self
 
     def transform(self, raw_documents: Iterable[str] = None,
-                  tokenized:pd.Series = None, bio_tags:pd.Series= None, use_idf=True) -> np.ndarray:
+                  tokenized: pd.Series = None, bio_tags: pd.Series = None) -> pd.DataFrame:
         """
         Transform documents into double tf-idf representation using idf scores learned from fit method.
         Must be run after class has been fitted
+        :param tokenized: pd.Series, containing lists of strings (tokens)
+        :param bio_tags: pd.Series, containing lists of bio_tags
         :param raw_documents: iterable yielding strings of documents to be transformed
-        :param preprocessed_text: TextGetter class containing tokenized documents and bio tags
-        :param normalize: default true, if true tf-idf scores for each document will be normalized using euclidean norm
         :return: np.ndarray of tf-idf scores
         """
-        self._use_idf = use_idf
         if not self.is_fitted():
             raise ValueError("Cannot transform text, vectorizer has not been fitted")
         if raw_documents:
@@ -256,6 +287,40 @@ class DoubleTfIdfVectorizer(NamedEntityVectorizer):
         self._calculate_tf_idf()
         return self.tfidf
 
+    def fit_transform(self, raw_documents: Iterable[str] = None, tokenized: pd.Series = None,
+                      bio_tags: pd.Series = None, use_idf=True) -> pd.DataFrame:
+        """
+        Calculate idf frequencies of words  and transform documents into double tf-idf representation.
+        This is equal to fit followed by transform, but a bit more effecient
+
+        :param tokenized: pd.Series, containing lists of strings (tokens)
+        :param bio_tags: pd.Series, containing lists of bio_tags
+        :param use_idf: bool, defaults to true, if set to false this vectorizer will only compute term frequencies
+        :param raw_documents: iterable yielding strings of documents to be transformed
+        :return: pd.Dataframe of tf-idf scores
+        """
+        self._validate_params(raw_documents, tokenized, bio_tags)
+        if raw_documents:
+            self.corpus = raw_documents
+            self.tokenize_and_tag(raw_documents)
+            # todo make it work with df, don t tokenize raw documents - use spacy?
+        elif tokenized is not None and bio_tags is not None:
+            self._df = pd.DataFrame({"Tokens": tokenized, "Tags": bio_tags})
+            self.corpus = tokenized
+
+        self._preprocess()
+        if use_idf:
+            self._count_df()
+            self._narrow_down_vocab()
+            self._invert_df()
+            self._calculate_tf_idf()
+        else:
+            self._calculate_tf()
+
+        if self.norm:
+            self.tfidf = _normalize(self.tfidf)
+        return self.tfidf
+
     def _validate_params(self, raw_documents, tokenized, bio_tags):
         if not (tokenized is not None and bio_tags is not None) and self.tune_ner:
             raise ValueError("Bio tags must be provided to do name entity classificator tuning")
@@ -263,13 +328,12 @@ class DoubleTfIdfVectorizer(NamedEntityVectorizer):
             raise ValueError("Either raw documents or tokenized and bio_tags must be provided")
         if tokenized is not None and bio_tags is not None:
             if not len(tokenized) == len(bio_tags):
-                raise ValueError("Expected tokenized sentences and tokenlist to have the same length")
+                raise ValueError("Expected tokenized sentences and tag list to have the same length")
 
     def _preprocess(self):
-        if self.filter_stopwords:
-            self._filter_stopwords()
-        else:
-            self._lower_and_filter_punctuation()
+        if self.lower:
+            self._lower()
+        self._filter()
         if self.lemmatize:
             self._lemmatize()
 
@@ -285,11 +349,14 @@ class DoubleTfIdfVectorizer(NamedEntityVectorizer):
         self._token_count = df_degrouped["Term"].value_counts()
 
     def _calculate_tf_idf(self):
+        self._calculate_tf()
+        self.tfidf = self.tfidf.multiply(self._idf, axis=1)
+
+    def _calculate_tf(self):
         self._idf = self._idf.sort_index()
         self.feature_names = self._idf.index.values.tolist()
 
-        self.tfidf = pd.DataFrame(columns=self.feature_names, index = self._df.index)
-
+        self.tfidf = pd.DataFrame(columns=self.feature_names, index=self._df.index)
         for idx, row in self._df.iterrows():
             terms = []
             for word, tag in zip(row["Tokens"], row["Tags"]):
@@ -301,14 +368,10 @@ class DoubleTfIdfVectorizer(NamedEntityVectorizer):
                     terms.append(word)
             doc_len = len(row["Tokens"])
             tf = pd.Series(terms).value_counts()
-            tf = tf/doc_len
+            tf = tf / doc_len
             for word, tf_val in tf.iteritems():
                 self.tfidf.loc[idx][word] = tf_val
-
         self.tfidf = self.tfidf.fillna(0)
-        self.tfidf = self.tfidf.multiply(self._idf, axis=1)
-        if self.norm:
-            self.tfidf = _normalize(self.tfidf)
 
 
 class BioTfIdfVectorizer(DoubleTfIdfVectorizer):
@@ -328,7 +391,8 @@ class BioTfIdfVectorizer(DoubleTfIdfVectorizer):
 
     def __init__(self, ner_classifier: NamedEntityClassifier = None, max_df: float = 1.0, min_df: float = 1,
                  tune_classifier: bool = False, filter_stopwords: bool = True, lemmatize: bool = True,
-                 normalize: bool = True):
+                 normalize: bool = True, filter_punctuation: bool = True, filter_whitespaces: bool = True,
+                 lower: bool = True):
         """
         :param max_df
         int or float, ignore words that have higher document
@@ -348,75 +412,52 @@ class BioTfIdfVectorizer(DoubleTfIdfVectorizer):
         :param ner_classifier:
         named entity classifier that will be used for bio tags prediction if none are provided in fit and transform
         methods
+        :param filter_whitespaces:
+        bool, defaults to true, filters out whitespace only tokens (and associated ner tags)
+        :param filter_punctuation:
+        bool, defaults to true, filters out punctuation tokens
+        :param lower:
+        bool, defaults to true, lowers all characters in strings
+        :param normalize:
+        bool, defaults  to true, resulting tf-idf vectors will be  normalized so that their  measure is equal to one
         """
-        super().__init__(ner_classifier, max_df, min_df, tune_classifier, filter_stopwords, lemmatize, normalize)
+        super().__init__(ner_classifier, max_df, min_df, tune_classifier, filter_stopwords, lemmatize, normalize,
+                         filter_punctuation, filter_whitespaces, lower)
         self.tfidf = None
 
-    #todo make work with df
     def _count_df(self):
-        for sentence in self._preprocessed:
-            words = set()
-            for word, tag in sentence:
+        df_degrouped = pd.DataFrame(columns=["Term"])
+        for _,row in self._df.iterrows():
+            terms= set()
+            for word, tag in zip(row["Tokens"], row["Tags"]):
                 if tag != "O":
-                    words.add(tag)
-                words.add(word)
-            for word in words:
-                self._idf[word] += 1
+                    key = _strip_prefix_if_bio_tag(tag)
+                    terms.add(key)
+                terms.add(word)
+            df_degrouped = df_degrouped.append(pd.DataFrame({"Term": list(terms)}))
+        self._token_count = df_degrouped["Term"].value_counts()
 
-    #todo make work with df
-    def _calculate_tf_idf(self):
-        vocab_size = len(self._idf)
-        doc_num = len(self._preprocessed)
-        self.tfidf = np.zeros((doc_num, vocab_size))
-        self.feature_names = [key for key, _ in self._idf.items()]
-        self.feature_names.sort()
-        for i in range(0, doc_num):
-            for word, tag in self._preprocessed[i]:
+    def _calculate_tf(self):
+        self._idf = self._idf.sort_index()
+        self.feature_names = self._idf.index.values.tolist()
+
+        self.tfidf = pd.DataFrame(columns=self.feature_names, index=self._df.index)
+        for idx, row in self._df.iterrows():
+            terms = []
+            for word, tag in zip(row["Tokens"], row["Tags"]):
                 if tag != "O":
-                    key = tag[2:]
+                    key = _strip_prefix_if_bio_tag(tag)
                     if key in self.feature_names:
-                        col_num = self.feature_names.index(key)
-                        self.tfidf[i, col_num] += 1
+                        terms.append(key)
                 if word in self.feature_names:
-                    col_num = self.feature_names.index(word)
-                    self.tfidf[i, col_num] += 1
-            self.tfidf[i, :] /= len(self._preprocessed[i]) + len(
-                [tag for _, tag in self._preprocessed[i] if tag != "O"])
-
-        for col_num in range(0, vocab_size):
-            feature_name = self.feature_names[col_num]
-            idf_score = self._idf[feature_name]
-            self.tfidf[:, col_num] *= idf_score
-        if self.norm:
-            self.tfidf = _normalize(self.tfidf)
+                    terms.append(word)
+            doc_len = len(row["Tokens"])
+            tf = pd.Series(terms).value_counts()
+            tf = tf / doc_len
+            for word, tf_val in tf.iteritems():
+                self.tfidf.loc[idx][word] = tf_val
+        self.tfidf = self.tfidf.fillna(0)
 
 
-from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
-import pandas as pd
-
-if __name__ == "__main__":
-    sentences = [["This", "is", "the", "first", "document", "here"],
-                 ["And", "here", "we", "have", "the", "second", "one"]]
-    tags = [['O' for t in s] for s in sentences]
-    sentence_concat = [" ".join(s) for s in sentences]
-
-    df = pd.DataFrame({"Tokens": sentences, "Tags": tags})
-
-    mine = DoubleTfIdfVectorizer(filter_stopwords=False,lemmatize=False)
-    tfidf = TfidfVectorizer()
-    count = CountVectorizer()
-    print("--- sklearn ----")
-    tf_idf = tfidf.fit_transform(sentence_concat)
-    sklearn_tfidf = pd.DataFrame(data=tf_idf.toarray(),columns = tfidf.get_feature_names())
-    #sklearn_count = pd.DataFrame(data=count.fit_transform(sentence_concat).toarray(), columns=count.get_feature_names())
-    #print("Count: ")
-    #print(sklearn_count)
-    print("Tfidf: ")
-    print(sklearn_tfidf)
-    print("---- custom ----")
-    res = mine.fit(tokenized=df["Tokens"], bio_tags=df["Tags"])
-    res2 = mine.transform(tokenized=df["Tokens"], bio_tags=df["Tags"])
-    df = pd.DataFrame(res2, columns=mine.get_feature_names())
-    print("Tfidf: ")
-    print(df)
-
+ner = BioTfIdfVectorizer(filter_stopwords=False,lemmatize=False)
+print(ner.fit_transform(tokenized=pd.Series([["a","b"]]),bio_tags=pd.Series([["B-PER","ORG"]])))

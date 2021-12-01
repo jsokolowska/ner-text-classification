@@ -11,7 +11,7 @@ TokenList = List[List[str]]
 TextData = (List[LabelledSentence], List[str])
 
 
-# todo refactor to use dataframes instead of this textgetter ?s
+# todo refactor to use dataframes instead of this textgetter
 class TextGetter:
     def __init__(self, labelled_sentences: List[LabelledSentence] = None, sentences: TokenList = None,
                  bio_tags: TokenList = None,
@@ -48,7 +48,7 @@ def load_preprocessed_ner_data(data_path: str = "../data/kaggle-ner/ner_dataset.
 def _get_sentences(data: pd.DataFrame):
     return data.groupby("Sentence #").apply(
         lambda sentence: [(word, tag) for word, tag
-                          in zip(sentence["Word"].values.tolist(),
+                          in zip(sentence["Token"].values.tolist(),
                                  sentence["Tag"].values.tolist())]
     )
 
@@ -168,7 +168,7 @@ def _check_and_group_class(sentence_data):
 def save_tagged_classification(df,filepath):
     df_degrouped = pd.DataFrame(columns=["Sentence #", "Tokens","Tags", "Class"])
     for idx,row in  df.iterrows():
-        df_temp = pd.DataFrame({"Token":row["Tokens"], "Tag":row["Tags"],"Class": row["Class"], "Sentence #" : idx})
+        df_temp = pd.DataFrame({"Token":row["tokens"], "Tag":row["tags"],"Class": row["Class"], "Sentence #" : idx})
         df_degrouped = df_degrouped.append(df_temp)
     df_degrouped.to_csv(filepath)
 
