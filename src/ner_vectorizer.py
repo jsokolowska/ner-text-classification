@@ -140,6 +140,31 @@ class NamedEntityVectorizer(ABC):
             pos_tagged = _add_pos_tags(row["Tokens"])
             row["Tokens"] = [self._lemmatizer.lemmatize(w, t) for w, t in pos_tagged]
 
+    def build_preprocessor(self):
+        steps = []
+        if self.lower:
+            steps.append(lambda tokenlist: [e.lower() for e in tokenlist])
+        filter_out = []
+        if self.filter_punctuation:
+            filter_out.extend(self._PUNCTUATION)
+        if self.filter_stopwords:
+            filter_out.extend(list(self._STOPWORDS))
+        if len(filter_out) > 0:
+            steps.append(lambda tokenlist: [e for e in tokenlist if e not in filter_out])
+        if self.filter_whitespaces:
+            steps.append(lambda tokenlist: [e for e in tokenlist if not e.isspace()])
+        if self.lemmatize:
+            steps.append(lambda tokenlist: [self._lemmatizer.lemmatize(w,t) for w,t in _add_pos_tags(tokenlist)])
+
+
+        def preprocessor(x):
+            lst = x
+            for step in steps:
+                lst = step(lst)
+            return lst
+
+        return preprocessor
+
 
 def _normalize(tfidf: pd.DataFrame) -> pd.DataFrame:
     squared = tfidf ** 2
@@ -427,8 +452,8 @@ class BioTfIdfVectorizer(DoubleTfIdfVectorizer):
 
     def _count_df(self):
         df_degrouped = pd.DataFrame(columns=["Term"])
-        for _,row in self._df.iterrows():
-            terms= set()
+        for _, row in self._df.iterrows():
+            terms = set()
             for word, tag in zip(row["Tokens"], row["Tags"]):
                 if tag != "O":
                     key = _strip_prefix_if_bio_tag(tag)
@@ -459,5 +484,11 @@ class BioTfIdfVectorizer(DoubleTfIdfVectorizer):
         self.tfidf = self.tfidf.fillna(0)
 
 
-ner = BioTfIdfVectorizer(filter_stopwords=False,lemmatize=False)
-print(ner.fit_transform(tokenized=pd.Series([["a","b"]]),bio_tags=pd.Series([["B-PER","ORG"]])))
+if __name__ == "__main__":
+    sent = ["jumped", "right", "into", "a", "average",",","but", "spirited", "young", "woman","."]
+    tags = [["0" for t in sent]]
+    tfidf = DoubleTfIdfVectorizer()
+    tfidf.fit(tokenized= [sent], bio_tags = tags)
+    pass
+
+#%%

@@ -147,8 +147,8 @@ def _from_spacy_format(processed_examples: Iterable[Doc]) -> pd.DataFrame:
 
 
 if __name__ == "__main__":
-    df = pd.read_csv("../preprocessed_data/bbc/whole_raw.csv")
+    df = pd.read_csv("../preprocessed-data/bbc/whole_raw.csv")
 
-    ner = SpacyNEClassifier(filepath = "../pretrained_models/kaggle-ner-train-spacy")
+    ner = SpacyNEClassifier(filepath ="../pretrained-models/kaggle-ner-train-spacy")
     res = ner.predict(raw_data=df["raw_text"][:10])
     print(res.labelled_sentences)

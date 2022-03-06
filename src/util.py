@@ -10,7 +10,6 @@ LabelledSentence = List[Tuple[str, str]]
 TokenList = List[List[str]]
 TextData = (List[LabelledSentence], List[str])
 
-
 # todo refactor to use dataframes instead of this textgetter
 class TextGetter:
     def __init__(self, labelled_sentences: List[LabelledSentence] = None, sentences: TokenList = None,
@@ -174,19 +173,19 @@ def save_tagged_classification(df,filepath):
 
 
 def load_and_split_all_data():
-    conll2csv("../data/panx_dataset/en/", "../preprocessed_data/panx_dataset/en/", ["train", "test", "dev"], None, "en:")
-    conll2csv("../data/broad-twitter-corpus/", "../preprocessed_data/btc/", ["a", "b", "e", "f", "g", "h"], "conll")
+    conll2csv("../data/panx_dataset/en/", "../preprocessed-data/panx_dataset/en/", ["train", "test", "dev"], None, "en:")
+    conll2csv("../data/broad-twitter-corpus/", "../preprocessed-data/btc/", ["a", "b", "e", "f", "g", "h"], "conll")
 
     data = load_preprocessed_ner_data("../data/kaggle-ner/ner_dataset.csv")
     res_train, res_test_dev = data_split(data, test_size=0.3)
     res_dev, res_test = data_split(res_test_dev, test_size=0.5)
-    save_ner("../preprocessed_data/kaggle-ner/test.csv", text_getter=res_test)
-    save_ner("../preprocessed_data/kaggle-ner/dev.csv", text_getter=res_dev)
-    save_ner("../preprocessed_data/kaggle-ner/train.csv", text_getter=res_train)
+    save_ner("../preprocessed-data/kaggle-ner/test.csv", text_getter=res_test)
+    save_ner("../preprocessed-data/kaggle-ner/dev.csv", text_getter=res_dev)
+    save_ner("../preprocessed-data/kaggle-ner/train.csv", text_getter=res_train)
 
 
 
 if __name__ == "__main__":
     # load_and_split_all_data()
-    loaded = load_preprocessed_ner_data("../preprocessed_data/panx_dataset/en/train.csv")
+    loaded = load_preprocessed_ner_data("../preprocessed-data/panx_dataset/en/train.csv")
     a = 2
