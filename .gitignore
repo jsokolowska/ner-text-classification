@@ -3,3 +3,9 @@
 /shared-with-prof/
 /pretrained_models/
 
+/venv/
+/data/
+/.env/
+/test/.pytest_cache/
+/.pytest_cache/
+/.env/

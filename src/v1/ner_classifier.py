@@ -25,11 +25,13 @@ class NamedEntityClassifier(ABC):
         pass
 
     @abstractmethod
-    def train(self, train_data: List[List[Tuple[str, str]]], tags: List[str], n_iter: int):
+    def train(
+        self, train_data: List[List[Tuple[str, str]]], tags: List[str], n_iter: int
+    ):
         pass
 
     @abstractmethod
-    def predict(self, test_data: List[List[str]], raw_data:Iterable[str]):
+    def predict(self, test_data: List[List[str]], raw_data: Iterable[str]):
         pass
 
 
@@ -54,23 +56,25 @@ class SpacyNEClassifier(NamedEntityClassifier):
             self._load_from_library()
 
     def _load_from_file(self, filepath: str):
-        self.nlp = spacy.blank('en')
-        self.nlp.add_pipe('ner')
+        self.nlp = spacy.blank("en")
+        self.nlp.add_pipe("ner")
         self.nlp.from_disk(filepath)
-        self.ner = self.nlp.get_pipe('ner')
+        self.ner = self.nlp.get_pipe("ner")
 
     def _load_from_library(self):
-        self.nlp = spacy.blank('en')
-        self.nlp.add_pipe('ner')
-        self.ner = self.nlp.get_pipe('ner')
+        self.nlp = spacy.blank("en")
+        self.nlp.add_pipe("ner")
+        self.ner = self.nlp.get_pipe("ner")
 
     # todo redo for df
-    def train(self, train_data: List[List[Tuple[str, str]]], tags: List[str], n_iter: int):
+    def train(
+        self, train_data: List[List[Tuple[str, str]]], tags: List[str], n_iter: int
+    ):
         self.reformatted_data = _to_spacy_format(train_data)
         self._add_tags(tags)
 
         optimizer = self.nlp.begin_training()
-        pipes = [p for p in self.nlp.pipe_names if p != 'ner']
+        pipes = [p for p in self.nlp.pipe_names if p != "ner"]
         with self.nlp.disable_pipes(*pipes):
             examples = self._make_training_examples()
             self.nlp.initialize(lambda: examples)
@@ -80,9 +84,11 @@ class SpacyNEClassifier(NamedEntityClassifier):
                 for batch in minibatch(examples, size=8):
                     loss = {}
                     self.nlp.update(batch, sgd=optimizer, losses=loss)
-                    self.losses.append(loss['ner'])
+                    self.losses.append(loss["ner"])
 
-    def predict(self, test_data: List[List[str]] = None, raw_data: Iterable[str] = None):
+    def predict(
+        self, test_data: List[List[str]] = None, raw_data: Iterable[str] = None
+    ):
         test_docs = self._make_doc_test(test_data, raw_data)
 
         scores = self.ner.predict(test_docs)
@@ -99,7 +105,9 @@ class SpacyNEClassifier(NamedEntityClassifier):
             examples.append(Example.from_dict(doc, annotation))
         return examples
 
-    def _make_doc_test(self, test_data: List[List[str]] = None, raw_data: Iterable[str] = None) -> Iterable[Doc]:
+    def _make_doc_test(
+        self, test_data: List[List[str]] = None, raw_data: Iterable[str] = None
+    ) -> Iterable[Doc]:
         if test_data is not None:
             return [self.nlp.make_doc(" ".join(words)) for words in test_data]
         elif raw_data is not None:
@@ -122,7 +130,7 @@ def _to_spacy_format(labeled_sentences: List[List[Tuple[str, str]]]):
         entity_list = []
         idx = 0
         for token, label in labeled_sentence:
-            if label != 'O':
+            if label != "O":
                 entity_list.append((idx, idx + len(token), label))
             idx += len(token) + 1
 
@@ -136,10 +144,10 @@ def _from_spacy_format(processed_examples: Iterable[Doc]) -> pd.DataFrame:
     tags = []
     for elem in processed_examples:
         tokens = [token for token in elem]
-        labels = ['0' for i in range(len(tokens))]
+        labels = ["0" for i in range(len(tokens))]
         for entity in elem.ents:
             for idx in range(entity.start, entity.end):
-                labels[idx]= entity.label_
+                labels[idx] = entity.label_
 
         sentences.append(tokens)
         tags.append(labels)
@@ -147,8 +155,8 @@ def _from_spacy_format(processed_examples: Iterable[Doc]) -> pd.DataFrame:
 
 
 if __name__ == "__main__":
-    df = pd.read_csv("../preprocessed-data/bbc/whole_raw.csv")
+    df = pd.read_csv("../preprocessed-data/bbc/raw.csv")
 
-    ner = SpacyNEClassifier(filepath ="../pretrained-models/kaggle-ner-train-spacy")
+    ner = SpacyNEClassifier(filepath="../pretrained-models/kaggle-ner-train-spacy")
     res = ner.predict(raw_data=df["raw_text"][:10])
     print(res.labelled_sentences)
