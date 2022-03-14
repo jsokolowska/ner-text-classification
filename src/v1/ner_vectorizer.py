@@ -1,3 +1,4 @@
+import nltk
 from nltk.tokenize import word_tokenize
 from nltk.corpus import wordnet
 from nltk.tag import pos_tag
@@ -605,9 +606,9 @@ if __name__ == "__main__":
         "woman",
         ".",
     ]
+    nltk.download("averaged_perceptron_tagger")
+    nltk.download("wordnet")
+    nltk.download("omw-1.4")
     tags = [["0" for t in sent]]
     tfidf = DoubleTfIdfVectorizer()
     tfidf.fit(tokenized=[sent], bio_tags=tags)
-    pass
-
-#%%

@@ -1,9 +1,17 @@
 from abc import ABC, abstractmethod
+
+import contractions
+import numpy as np
+from nltk import WordNetLemmatizer, pos_tag
+from string import punctuation
+
+from .common import PreprocessingPipeline
 from .ner_classifier import NamedEntityClassifier
-from typing import Callable, Iterable, Dict
-from nltk.corpus import stopwords
+from typing import Callable, Iterable, Dict, Tuple
+from nltk.corpus import stopwords, wordnet
 import nltk
 import pandas as pd
+import time
 
 
 class NamedEntityVectorizer(ABC):
@@ -21,10 +29,13 @@ class NamedEntityVectorizer(ABC):
         lower: bool = True,
         fix_contractions: bool = True,
         preprocessor: Callable[[str], str] = None,
-        token_filter: Callable[[Iterable[str]], Iterable[str]] = None,
+        token_filter: Callable[
+            [Iterable[Tuple[str, str]]], Iterable[Tuple[str, str]]
+        ] = None,
     ):
         # Download needed nltk libraries
-        nltk.download("stopwords")
+        # nltk.download("stopwords")
+        # nltk.download('averaged_perceptron_tagger')
 
         self.clf = ner_clf
 
@@ -46,6 +57,12 @@ class NamedEntityVectorizer(ABC):
         self._df = None
         self._STOPWORDS = stopwords
         self._feature_names = []
+        self.tokenized = None
+        self.tagged = None
+        self._use_idf = None
+        self.corpus = None
+        self._time_count = []
+        self.__lemmatizer = WordNetLemmatizer()
 
     @abstractmethod
     def fit(
@@ -93,31 +110,179 @@ class NamedEntityVectorizer(ABC):
         self, raw_documents: Iterable[str], tokenized: pd.Series, tags: pd.Series
     ):
         if raw_documents is not None and (tokenized is not None or tags is not None):
-            raise TypeError(
+            raise ValueError(
                 f"Please provide either raw documents or tokenized documents and tags"
             )
+        elif raw_documents is not None and self.clf is None:
+            raise ValueError(f"When using raw_documents please provide ne classifier")
         elif (tokenized is not None and tags is None) or (
             tokenized is None and tags is not None
         ):
             raise TypeError(
                 f"You need to provide tokenized sentences and tags associated with them"
             )
-
-        if len(tokenized) != len(tags):
+        if tokenized is not None and tags is not None and len(tokenized) != len(tags):
             raise TypeError(f"Input length mismatch")
 
-    def _preprocess(self):
-        # call user-defined preprocessor
-        # todo clean html tags
-        # todo fix contractions
-        pass
+    def _preprocess(self, documents: [str]):
+        def preprocess_pipeline() -> PreprocessingPipeline:
+            pipeline = PreprocessingPipeline()
+            if self.preprocessor:
+                pipeline.add(self.preprocessor)
+            pipeline.add(contractions.fix)
+            return pipeline
 
-    def _tag(self):
-        # todo tag ner classifier
-        pass
+        pipe = preprocess_pipeline()
+        return [pipe.run(text) for text in documents]
+
+    def _tag(self, preprocessed: [str]):
+        self._df = self.clf.predict(preprocessed)
 
     def _calculate_idf(self):
+        self._time_count.append(("Before count", time.time()))
+        self._count_df()
+        self._time_count.append(("After count", time.time()))
+        self._narrow_down_vocab()
+        self._time_count.append(("Before invert", time.time()))
+        self._invert_df()
+        self._time_count.append(("After invert", time.time()))
+
+    def _group(self):
+        if "sentence #" in self._df.columns:
+            df = pd.DataFrame()
+            df["tokens"] = self._df.groupby("sentence #").apply(
+                lambda sent: [w for w in sent["tokens"].values.tolist()]
+            )
+            df["tags"] = self._df.groupby("sentence #").apply(
+                lambda sent: [t for t in sent["tags"].values.tolist()]
+            )
+            self._df = df
+
+    def _degroup(self):
+        if "sentence #" not in self._df.columns:
+            self._df["sentence #"] = [i for i in range(0, len(self._df))]
+        elif not self._df["sentence #"].is_unique:
+            return
+        self._df = self._df.explode(["tokens", "tags"])
+
+    def _count_df(self):
+        def add(x):
+            keys = self._get_tokens(x[1], x[2])
+            tokens.extend(keys)
+
+        self._degroup()
+        tokens = []
+        self._df.apply(lambda x: add(x), axis=1)
+        self._token_count = pd.Series(tokens).value_counts()
+
+    @abstractmethod
+    def _get_tokens(self, word: str, tag: str) -> [str]:
         pass
+
+    def _calculate_tf_idf(self):
+        if self._use_idf:
+            self._calculate_tfidf()
+        else:
+            self._calculate_tf()
+
+    def _calculate_tfidf(self):
+        self._group()
+        self._calculate_tf()
+        self.tfidf = self.tfidf.multiply(self._idf, axis=1)
+
+    def _narrow_down_vocab(self):
+        doc_num = len(self.corpus)
+        lower_bound = self.min_df
+        upper_bound = self.max_df
+        if isinstance(self.min_df, float):
+            lower_bound *= doc_num
+        if isinstance(self.max_df, float):
+            upper_bound *= doc_num
+
+        self._idf = self._token_count.where(
+            lambda x: [upper_bound >= item >= lower_bound for item in x]
+        ).dropna()
+
+    def _invert_df(self):
+        doc_num = len(self.corpus)
+        self._idf = np.log((1 + doc_num) / (1 + self._idf)) + 1
+
+    def _calculate_tf(self):
+        self._time_count.append(("Before tf count", time.time()))
+        self._idf = self._idf.sort_index()
+        self.feature_names = self._idf.index.values.tolist()
+
+        self.tfidf = pd.DataFrame(columns=self.feature_names, index=self._df.index)
+        for idx, row in self._df.iterrows():
+            terms = []
+            for word, tag in zip(row["tokens"], row["tags"]):
+                keys = self._get_tokens(word, tag)
+                terms.extend(keys)
+            doc_len = len(row["tokens"])
+            tf = pd.Series(terms).value_counts()
+            tf = tf / doc_len
+            for word, tf_val in tf.iteritems():
+                self.tfidf.loc[idx][word] = tf_val
+        self.tfidf = self.tfidf.fillna(0)
+        self._time_count.append(("After tf count", time.time()))
+
+    def _filter_tokens(self):
+        self._group()
+        pipe = PreprocessingPipeline()
+        if self.lemmatize:
+            pipe.add(self._lemmatize)
+        if self.lower:
+            pipe.add(lambda lst: [(z.lower(), y) for z, y in lst])
+        if self.filter_stopwords:
+            pipe.add(
+                lambda lst: [
+                    (x, y) for x, y in lst if x not in stopwords.words("english")
+                ]
+            )
+        pipe.add(
+            lambda lst: [
+                (x, y) for x, y in lst if all(char not in punctuation for char in x)
+            ]
+        )
+        if self.token_filter:
+            pipe.add(lambda lst: self.token_filter(lst))
+        tokens = []
+        tags = []
+        for token_list, tag_list in zip(self._df["tokens"], self._df["tags"]):
+            res = pipe.run([(w, t) for w, t in zip(token_list, tag_list)])
+            tokens.append([w for w, _ in res])
+            tags.append([t for _, t in res])
+        self._df = pd.DataFrame(
+            {
+                "sentence #": [i for i in range(0, len(tokens))],
+                "tokens": tokens,
+                "tags": tags,
+            }
+        )
+
+    def _lemmatize(self, lst) -> [str]:
+        def get_wnet_tag(tag):
+            if tag.startswith("J"):
+                return wordnet.ADJ
+            if tag.startswith("V"):
+                return wordnet.VERB
+            if tag.startswith("R"):
+                return wordnet.ADV
+            else:
+                return wordnet.NOUN
+
+        pos_tagged = pos_tag([w for w, _ in lst])
+        lemmatized = [
+            self.__lemmatizer.lemmatize(w, get_wnet_tag(t)) for w, t in pos_tagged
+        ]
+        return [(l, t) for l, t in zip(lemmatized, [t for _, t in lst])]
+
+    def _is_fitted(self):
+        if self._use_idf:
+            return True
+        elif self._idf is not None:
+            return True
+        return False
 
 
 def _validate_params(raw_documents, tokenized, bio_tags):
@@ -232,7 +397,6 @@ class DoubleTfIdfVectorizer(NamedEntityVectorizer):
         raw_documents: Iterable[str] = None,
         tokenized: pd.Series = None,
         bio_tags: pd.Series = None,
-        n_iter: int = 10,
     ) -> NamedEntityVectorizer:
         """Calculate idf frequencies of words
         :param raw_documents
@@ -246,21 +410,23 @@ class DoubleTfIdfVectorizer(NamedEntityVectorizer):
         """
         _validate_params(raw_documents, tokenized, bio_tags)
         if raw_documents:
-            self._preprocess()
-            self._tag()
+            self._time_count.append(("Before preprocessing [ms]", time.time()))
+            self.corpus = raw_documents
+            preprocessed = self._preprocess(raw_documents)
+            self._tag(preprocessed)
+            self._time_count.append(("After preprocessing [ms]", time.time()))
         else:
+            self.corpus = tokenized
             self._df = pd.DataFrame({"Tokens": tokenized, "Tags": bio_tags})
+        self._filter_tokens()
         self._calculate_idf()
         return self
 
-    def _preprocess(self):
-        pass
+    def get_idf(self):
+        return self._idf
 
-    def _tag(self):
-        pass
-
-    def _calculate_idf(self):
-        pass
+    def get_time_counts(self):
+        return self._time_count
 
     def fit_transform(
         self,
@@ -269,7 +435,23 @@ class DoubleTfIdfVectorizer(NamedEntityVectorizer):
         bio_tags: pd.Series = None,
         use_idf=True,
     ) -> pd.DataFrame:
-        pass
+        self._use_idf = use_idf
+        _validate_params(raw_documents, tokenized, bio_tags)
+        if raw_documents:
+            self._time_count.append(("Before preprocessing [ms]", time.time()))
+            self.corpus = raw_documents
+            preprocessed = self._preprocess(raw_documents)
+            self._tag(preprocessed)
+            self._time_count.append(("After preprocessing [ms]", time.time()))
+            self._group()
+        else:
+            self.corpus = tokenized
+            self._df = pd.DataFrame({"Tokens": tokenized, "Tags": bio_tags})
+        self._filter_tokens()
+        self._degroup()
+        self._calculate_idf()
+        self._calculate_tf_idf()
+        return self.tfidf
 
     def transform(
         self,
@@ -278,4 +460,36 @@ class DoubleTfIdfVectorizer(NamedEntityVectorizer):
         bio_tags: pd.Series = None,
         use_idf: bool = True,
     ) -> pd.DataFrame:
-        pass
+        self._use_idf = use_idf
+        if not self._is_fitted():
+            raise ValueError("Vectorizer not fitted")
+        _validate_params(raw_documents, tokenized, bio_tags)
+        if raw_documents:
+            self._time_count.append(("Before preprocessing [ms]", time.time()))
+            self.corpus = raw_documents
+            preprocessed = self._preprocess(raw_documents)
+            self._tag(preprocessed)
+            self._time_count.append(("After preprocessing [ms]", time.time()))
+        else:
+            self.corpus = tokenized
+            self._df = pd.DataFrame({"Tokens": tokenized, "Tags": bio_tags})
+        self._filter_tokens()
+        self._calculate_tf()
+        return self.tfidf
+
+    def preprocessing_only(self, raw_documents: Iterable[str]):
+        self._time_count.append(("Before preprocessing [ms]", time.time()))
+        self.corpus = raw_documents
+        preprocessed = self._preprocess(raw_documents)
+        self._tag(preprocessed)
+        self._time_count.append(("After preprocessing [ms]", time.time()))
+        self._group()
+        self._filter_tokens()
+        self._degroup()
+        return self._df
+
+    def _get_tokens(self, word: str, tag: str) -> [str]:
+        if tag == "O":
+            return [word]
+        else:
+            return [word + "_NE"]

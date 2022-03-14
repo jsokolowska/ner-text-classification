@@ -49,8 +49,8 @@ def _from_spacy_format(processed_examples: Iterable[Doc]) -> pd.DataFrame:
     tags = []
     counter = 0
     for elem in processed_examples:
-        tokens = [token for token in elem]
-        labels = ["0" for _ in range(len(tokens))]
+        tokens = [token.text for token in elem]
+        labels = ["O" for _ in range(len(tokens))]
         for entity in elem.ents:
             is_first = True
             for idx in range(entity.start, entity.end):
