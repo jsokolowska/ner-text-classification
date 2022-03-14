@@ -3,15 +3,17 @@ from abc import ABC, abstractmethod
 import contractions
 import numpy as np
 from nltk import WordNetLemmatizer, pos_tag
-from string import punctuation
+from spacy.lang.en import English
+from spacy.tokenizer import Tokenizer
 
 from .common import PreprocessingPipeline
 from .ner_classifier import NamedEntityClassifier
 from typing import Callable, Iterable, Dict, Tuple
 from nltk.corpus import stopwords, wordnet
-import nltk
 import pandas as pd
 import time
+
+__all__ = ["DoubleTfIdfVectorizer", "NamedEntityVectorizer"]
 
 
 class NamedEntityVectorizer(ABC):
@@ -33,10 +35,6 @@ class NamedEntityVectorizer(ABC):
             [Iterable[Tuple[str, str]]], Iterable[Tuple[str, str]]
         ] = None,
     ):
-        # Download needed nltk libraries
-        # nltk.download("stopwords")
-        # nltk.download('averaged_perceptron_tagger')
-
         self.clf = ner_clf
 
         self.min_df = min_df
@@ -63,6 +61,7 @@ class NamedEntityVectorizer(ABC):
         self.corpus = None
         self._time_count = []
         self.__lemmatizer = WordNetLemmatizer()
+        self.tfidf = None
 
     @abstractmethod
     def fit(
@@ -125,15 +124,15 @@ class NamedEntityVectorizer(ABC):
             raise TypeError(f"Input length mismatch")
 
     def _preprocess(self, documents: [str]):
-        def preprocess_pipeline() -> PreprocessingPipeline:
-            pipeline = PreprocessingPipeline()
-            if self.preprocessor:
-                pipeline.add(self.preprocessor)
-            pipeline.add(contractions.fix)
-            return pipeline
-
-        pipe = preprocess_pipeline()
+        pipe = self._preprocess_pipeline()
         return [pipe.run(text) for text in documents]
+
+    def _preprocess_pipeline(self) -> PreprocessingPipeline:
+        pipeline = PreprocessingPipeline()
+        if self.preprocessor:
+            pipeline.add(self.preprocessor)
+        pipeline.add(contractions.fix)
+        return pipeline
 
     def _tag(self, preprocessed: [str]):
         self._df = self.clf.predict(preprocessed)
@@ -178,6 +177,44 @@ class NamedEntityVectorizer(ABC):
     @abstractmethod
     def _get_tokens(self, word: str, tag: str) -> [str]:
         pass
+
+    def _build_preprocessor(self):
+        def preprocess_for_sklearn(sentence):
+            results = pipe.run(sentence)
+            return [w for w, _ in results]
+
+        def lemmatize_no_tag(tokenlist):
+            pos_tagged = pos_tag(tokenlist)
+            return [lemmatizer.lemmatize(w, get_wnet_tag(t)) for w, t in pos_tagged]
+
+        lemmatizer = self.__lemmatizer
+        pipe = PreprocessingPipeline()
+
+        if self.lemmatize:
+            pipe.add(lemmatize_no_tag)
+        if self.lower:
+            pipe.add(lambda lst: [t.lower() for t in lst])
+        if self.filter_stopwords:
+            pipe.add(
+                lambda lst: [
+                    token for token in lst if token not in stopwords.words("english")
+                ]
+            )
+        if self.token_filter:
+            pipe.add(lambda lst: self.token_filter([(token, "O") for token in lst]))
+        return preprocess_for_sklearn
+
+    def build_preprocessor_and_tokenizer(self):
+        def tokenize_and_preprocess(sentence):
+            cleaned = pipe.run(sentence)
+            tokenlist = [t.text for t in tokenizer(cleaned)]
+            return preprocessor(tokenlist)
+
+        preprocessor = self._build_preprocessor()
+        pipe = self._preprocess_pipeline()
+        nlp = English()
+        tokenizer = Tokenizer(nlp.vocab)
+        return tokenize_and_preprocess
 
     def _calculate_tf_idf(self):
         if self._use_idf:
@@ -239,11 +276,6 @@ class NamedEntityVectorizer(ABC):
                     (x, y) for x, y in lst if x not in stopwords.words("english")
                 ]
             )
-        pipe.add(
-            lambda lst: [
-                (x, y) for x, y in lst if all(char not in punctuation for char in x)
-            ]
-        )
         if self.token_filter:
             pipe.add(lambda lst: self.token_filter(lst))
         tokens = []
@@ -261,16 +293,6 @@ class NamedEntityVectorizer(ABC):
         )
 
     def _lemmatize(self, lst) -> [str]:
-        def get_wnet_tag(tag):
-            if tag.startswith("J"):
-                return wordnet.ADJ
-            if tag.startswith("V"):
-                return wordnet.VERB
-            if tag.startswith("R"):
-                return wordnet.ADV
-            else:
-                return wordnet.NOUN
-
         pos_tagged = pos_tag([w for w, _ in lst])
         lemmatized = [
             self.__lemmatizer.lemmatize(w, get_wnet_tag(t)) for w, t in pos_tagged
@@ -283,6 +305,24 @@ class NamedEntityVectorizer(ABC):
         elif self._idf is not None:
             return True
         return False
+
+
+def get_wnet_tag(tag):
+    if tag.startswith("J"):
+        return wordnet.ADJ
+    if tag.startswith("V"):
+        return wordnet.VERB
+    if tag.startswith("R"):
+        return wordnet.ADV
+    else:
+        return wordnet.NOUN
+
+
+def _normalize(tfidf: pd.DataFrame) -> pd.DataFrame:
+    squared = tfidf**2
+    norms = np.sqrt(squared.sum(axis=1))
+    norms[norms == 0] = 1  # prevent zero division
+    return tfidf.div(norms, axis=0)
 
 
 def _validate_params(raw_documents, tokenized, bio_tags):
@@ -451,6 +491,8 @@ class DoubleTfIdfVectorizer(NamedEntityVectorizer):
         self._degroup()
         self._calculate_idf()
         self._calculate_tf_idf()
+        if self.normalize:
+            self.tfidf = _normalize(self.tfidf)
         return self.tfidf
 
     def transform(
@@ -475,6 +517,8 @@ class DoubleTfIdfVectorizer(NamedEntityVectorizer):
             self._df = pd.DataFrame({"Tokens": tokenized, "Tags": bio_tags})
         self._filter_tokens()
         self._calculate_tf()
+        if self.normalize:
+            self.tfidf = _normalize(self.tfidf)
         return self.tfidf
 
     def preprocessing_only(self, raw_documents: Iterable[str]):

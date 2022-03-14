@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 import contractions
 
-from ner_classifier import NamedEntityClassifier
+from .ner_classifier import NamedEntityClassifier
 
 __all__ = ["DoubleTfIdfVectorizer"]
 

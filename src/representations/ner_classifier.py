@@ -3,8 +3,10 @@ import pandas as pd
 from typing import Iterable, Collection
 import spacy
 import time
+from spacy.lang.en import English
+from spacy.tokenizer import Tokenizer
 
-__all__ = ["NamedEntityClassifier", "SpacyNEClassifier"]
+__all__ = ["NamedEntityClassifier", "SpacyNEClassifier", "MockNoNamedEntityClassifier"]
 
 from spacy.tokens import Doc
 
@@ -16,6 +18,23 @@ class NamedEntityClassifier(ABC):
     @abstractmethod
     def predict(self, sentences: Collection[str]):
         pass
+
+
+class MockNoNamedEntityClassifier(NamedEntityClassifier):
+    def predict(self, sentences: Collection[str]):
+        tokenizer = Tokenizer(English().vocab)
+        tokenized = []
+        sentence_num = []
+        counter = 0
+        for sent in sentences:
+            tokenized.append([t.text for t in tokenizer(sent)])
+            sentence_num.append(counter)
+            counter += 1
+        df = pd.DataFrame({"sentence #": sentence_num, "tokens": tokenized}).explode(
+            "tokens"
+        )
+        df["tags"] = "O"
+        return df
 
 
 class SpacyNEClassifier(NamedEntityClassifier):
