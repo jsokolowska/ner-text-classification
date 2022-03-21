@@ -138,6 +138,7 @@ class NamedEntityVectorizer(ABC):
         self._df = self.clf.predict(preprocessed)
 
     def _calculate_idf(self):
+        self._degroup()
         self._time_count.append(("Before count", time.time()))
         self._count_df()
         self._time_count.append(("After count", time.time()))
@@ -147,7 +148,7 @@ class NamedEntityVectorizer(ABC):
         self._time_count.append(("After invert", time.time()))
 
     def _group(self):
-        if "sentence #" in self._df.columns:
+        if "sentence #" in self._df.columns and not self._df['sentence #'].is_unique:
             df = pd.DataFrame()
             df["tokens"] = self._df.groupby("sentence #").apply(
                 lambda sent: [w for w in sent["tokens"].values.tolist()]
@@ -181,7 +182,10 @@ class NamedEntityVectorizer(ABC):
     def _build_preprocessor(self):
         def preprocess_for_sklearn(sentence):
             results = pipe.run(sentence)
-            return [w for w, _ in results]
+            if results and type(results[0]) is tuple:
+                return [w for w, _ in results]
+            else:
+                return results
 
         def lemmatize_no_tag(tokenlist):
             pos_tagged = pos_tag(tokenlist)
@@ -457,7 +461,7 @@ class DoubleTfIdfVectorizer(NamedEntityVectorizer):
             self._time_count.append(("After preprocessing [ms]", time.time()))
         else:
             self.corpus = tokenized
-            self._df = pd.DataFrame({"Tokens": tokenized, "Tags": bio_tags})
+            self._df = pd.DataFrame({"tokens": tokenized, "tags": bio_tags})
         self._filter_tokens()
         self._calculate_idf()
         return self
@@ -483,12 +487,10 @@ class DoubleTfIdfVectorizer(NamedEntityVectorizer):
             preprocessed = self._preprocess(raw_documents)
             self._tag(preprocessed)
             self._time_count.append(("After preprocessing [ms]", time.time()))
-            self._group()
         else:
             self.corpus = tokenized
-            self._df = pd.DataFrame({"Tokens": tokenized, "Tags": bio_tags})
+            self._df = pd.DataFrame({"tokens": tokenized, "tags": bio_tags})
         self._filter_tokens()
-        self._degroup()
         self._calculate_idf()
         self._calculate_tf_idf()
         if self.normalize:
@@ -516,7 +518,7 @@ class DoubleTfIdfVectorizer(NamedEntityVectorizer):
             self.corpus = tokenized
             self._df = pd.DataFrame({"Tokens": tokenized, "Tags": bio_tags})
         self._filter_tokens()
-        self._calculate_tf()
+        self._calculate_tf_idf()
         if self.normalize:
             self.tfidf = _normalize(self.tfidf)
         return self.tfidf

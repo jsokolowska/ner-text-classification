@@ -24,6 +24,15 @@ if __name__ == "__main__":
         token_filter=token_filter,
     )
     res = vect.fit_transform(documents)
+    vect2 = DoubleTfIdfVectorizer(
+        ner_clf=ner,
+        max_df=1.0,
+        min_df=1,
+        preprocessor=text_preprocessing,
+        token_filter=token_filter,
+    )
+    vect2.fit(documents)
+    res2 = vect2.transform(documents)
 
 
     def sum_them(row):
@@ -32,16 +41,21 @@ if __name__ == "__main__":
         for idx in range(0, max_idx):
             sum += row[idx] ** 2
         return sum
-
+    print(res == res2)
+    print(all(res == res2))
 
     res["sum"] = res.apply(lambda row: sum_them(row), axis=1)
+    res2["sum"] = res2.apply(lambda row: sum_them(row), axis=1)
     print(res)
     print("----------")
     print(res.columns.values)
+    print("---f+t----")
+    print(res2)
+    print(res2.columns.values)
     print("----------")
     tfidf = TfidfVectorizer(
         analyzer="word",
-        tokenizer=vect.build_preprocessor_and_tokenizer(),
+        tokenizer=vect2.build_preprocessor_and_tokenizer(),
         token_pattern=None,
     )
     train_transformed = pd.DataFrame(
@@ -64,7 +78,7 @@ if __name__ == "__main__":
     # [DONE] todo investigate nan tokens in bbc '\x01' and '\x10own' and in imdb
     # [DONE] todo special tags removed? f.e. no user tags in disasters - and they should be there
 
-    # todo validate fit followed by transform [Wtorek rano]
+    # [DONE] todo validate fit followed by transform [Wtorek rano]
     # todo create and run representation scripts for all representations - with asserts for expected dimensions [Środa]
     # todo validate script output against previous outputs [Czwartek]
     # todo check multiple parameters combos [Future]
