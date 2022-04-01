@@ -67,13 +67,15 @@ def replace_token(token: str) -> str:
     return token
 
 
-def token_filter(token_lst):
-    result = []
-    for token, tag in token_lst:
+def token_filter(token_lst, tag_lst):
+    filtered_tokens = []
+    filtered_tags = []
+    for token, tag in zip(token_lst, tag_lst):
         temp = replace_token(token)
         if temp:
-            result.append((temp, tag))
-    return result
+            filtered_tags.append(tag)
+            filtered_tokens.append(token)
+    return filtered_tokens, filtered_tags
 
 
 def text_preprocessing(text: str) -> str:

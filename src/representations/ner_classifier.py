@@ -38,7 +38,7 @@ class MockNoNamedEntityClassifier(NamedEntityClassifier):
 
 
 class SpacyNEClassifier(NamedEntityClassifier):
-    def __init__(self, /, pretrained=None, model_name="en_core_web_md"):
+    def __init__(self, pretrained=None, model_name="en_core_web_md"):
         super().__init__()
         self.ner = None
         self.nlp = None

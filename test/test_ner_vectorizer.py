@@ -7,14 +7,6 @@ from src.representations.preprocessing import *
 from src.representations import DoubleTfIdfVectorizer, MockNoNamedEntityClassifier
 
 
-def test_fail():
-    assert 2 == 1
-
-
-def test_success():
-    assert 1 == 1
-
-
 @pytest.mark.parametrize(
     "tokenized, tags, raw",
     [
