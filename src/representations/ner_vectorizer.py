@@ -12,7 +12,8 @@ from typing import Callable, Iterable, Dict, Tuple
 from nltk.corpus import stopwords, wordnet
 import pandas as pd
 from collections import defaultdict
-from guppy import hpy
+from scipy.sparse import dok_matrix
+#from guppy import hpy
 
 __all__ = ["DoubleTfIdfVectorizer", "NamedEntityVectorizer", "BioTfIdfVectorizer"]
 
@@ -61,6 +62,8 @@ class NamedEntityVectorizer(ABC):
         self.tfidf = None
         self.feature_counts = defaultdict()
         self.feature_counts.default_factory = lambda: 0
+        self.feature_idx = defaultdict()
+        self.feature_idx.default_factory = self.feature_idx.__len__
         self.doc_num = 0
 
     @abstractmethod
@@ -168,17 +171,6 @@ class NamedEntityVectorizer(ABC):
             for k in keys:
                 self.feature_counts[k] += 1
 
-            # fixme debugging
-            # l1 = len(self.feature_counts) % 1000
-            # if l1 == 0 or l1 == 1:
-            #     h = hpy()
-            #     a = h.heap()
-            #     fc = h.iso(self.feature_counts)
-            #     df = h.iso(self._df)
-            #     print(fc)
-            #     print(df)
-            #     print(h.heap())
-
         lower_bound = self.min_df
         upper_bound = self.max_df
         if isinstance(self.min_df, float):
@@ -243,7 +235,6 @@ class NamedEntityVectorizer(ABC):
             self._calculate_tf()
 
     def _calculate_tfidf(self):
-        self._group()
         self._calculate_tf()
         self.tfidf = self.tfidf.multiply(self._idf, axis=1)
 
@@ -263,42 +254,43 @@ class NamedEntityVectorizer(ABC):
         self._idf = np.log((1 + self.doc_num) / (1 + self._idf)) + 1
 
     def _calculate_tf(self):
-        self._idf = self._idf.sort_index()
-        self.feature_names = self._idf.index.values.tolist()
+        self._idf = self._idf
+        self._group()
 
-        self.tfidf = pd.DataFrame(columns=self.feature_names, index=self._df.index)
+        tfidf = dok_matrix((len(self._df), len(self._idf.index.values.tolist())))
+
         for idx, row in self._df.iterrows():
-            terms = []
-            for word, tag in zip(row["tokens"], row["tags"]):
-                keys = self._get_tokens(word, tag)
-                terms.extend(keys)
-            doc_len = len(row["tokens"])
+            tokens, tags = self.filter_tokens_sent(row['tokens'], row['tags'])
+            terms = self._get_tokens(tokens, tags)
             tf = pd.Series(terms).value_counts()
-            tf = tf / doc_len
+            tf = tf / len(row["tokens"])
             for word, tf_val in tf.iteritems():
-                self.tfidf.loc[idx][word] = tf_val
-        self.tfidf = self.tfidf.fillna(0)
+                if word in self.feature_counts:
+                    col_idx = self.feature_idx[word]
+                    tfidf[idx, col_idx] = tf_val
+        self.feature_names = [*self.feature_idx.keys()]
+        self.tfidf = pd.DataFrame(tfidf.toarray(), columns=self.feature_names)
 
     """
     filter and preprocess tokens for given input document
     """
     def filter_tokens_sent(self, tokens, tags):
-        data = (tokens, tags)
         if self.lemmatize:
-            data = self._lemmatize(tokens, tags)
+            tokens, tags = self._lemmatize(tokens, tags)
         if self.lower:
-            data = ([word.lower() for word in data[0]], tags)
+            tokens = [word.lower() for word in tokens]
         if self.filter_stopwords:
             filtered_tokens = []
             filtered_tags = []
-            for token, tag in zip(data[0], data[1]):
+            for token, tag in zip(tokens, tags):
                 if token not in stopwords.words("english"):
                     filtered_tags.append(tag)
                     filtered_tokens.append(token)
-            data = (filtered_tokens, filtered_tags)
+            tokens = filtered_tokens
+            tags = filtered_tags
         if self.token_filter:
-            data = self.token_filter(data[0], data[1])
-        return data
+            tokens, tags = self.token_filter(tokens, tags)
+        return tokens, tags
 
     def _lemmatize(self, token_list, tag_list) -> [str]:
         pos_tagged = pos_tag(token_list)
@@ -518,14 +510,6 @@ class DoubleTfIdfVectorizer(NamedEntityVectorizer):
         if self.normalize:
             self.tfidf = _normalize(self.tfidf)
         return self.tfidf
-
-    def preprocessing_only(self, raw_documents: Iterable[str]):
-        preprocessed = self._preprocess(raw_documents)
-        self._tag(preprocessed)
-        self._group()
-        self._filter_tokens()
-        self._degroup()
-        return self._df
 
     def tag_only(self, raw_documents: Iterable[str]):
         preprocessed = self._preprocess(raw_documents)

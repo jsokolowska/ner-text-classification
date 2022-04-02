@@ -74,7 +74,7 @@ def token_filter(token_lst, tag_lst):
         temp = replace_token(token)
         if temp:
             filtered_tags.append(tag)
-            filtered_tokens.append(token)
+            filtered_tokens.append(temp)
     return filtered_tokens, filtered_tags
 
 

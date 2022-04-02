@@ -7,7 +7,7 @@ from tqdm import tqdm
 
 
 def load_train(data: Dataset):
-    return pd.read_csv(DATA_DIR + data.value + "\\" + State.RAW.value + "\\train.csv")
+    return pd.read_csv(DATA_DIR + data.value + "\\" + State.RAW.value + "\\train.csv", nrows=400)
 
 
 def time():
@@ -28,11 +28,13 @@ if __name__ == "__main__":
             min_df=0,
             max_df=1.0,
         )
-        res = vectorizer.preprocessing_only(train[TEXT_COL])
-        res.to_csv(DATA_DIR + d.value + "\\preprocessing.csv", index=False)
 
-        counts = vectorizer.get_time_counts()
-        start = counts[0][1]
-        for label, c in counts:
-            print(f"[{c - start}] {label}")
-    print(f"End time: {time()}")
+        res = vectorizer.fit_transform(
+            train['text']
+        )
+
+        col = res.columns.values
+        print(res.columns)
+        a = 2
+
+

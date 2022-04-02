@@ -3,6 +3,7 @@ import pytest
 import lorem
 from sklearn.feature_extraction.text import TfidfVectorizer
 from src.representations.preprocessing import *
+import numpy as np
 
 from src.representations import DoubleTfIdfVectorizer, MockNoNamedEntityClassifier
 
@@ -23,7 +24,9 @@ def test_input_validation_for_fit(tokenized, tags, raw):
     with pytest.raises(ValueError):
         vect.fit(tokenized=tokenized, bio_tags=tags, raw_documents=raw)
 
-
+"""
+For text containing no named entities named entity vectorizer should give the same results as tf-idf vectorizer that does not used NE info (sklearn implementation).
+"""
 def test_equality_to_sklearn():
     # given ne classifier that returns no entities
     ner = MockNoNamedEntityClassifier()
@@ -52,9 +55,19 @@ def test_equality_to_sklearn():
         columns=tfidf_vect.get_feature_names(),
     )
 
+    # and their columns are sorted
+    res_double = res_double.reindex(sorted(res_double.columns), axis=1)
+    res_sklearn = res_sklearn.reindex(sorted(res_sklearn.columns), axis=1)
+
+    # all vectors are normalized
+    for idx, row in res_double.iterrows():
+        sum = (row**2).sum()
+        assert np.isclose(sum, 1.0)
+
     # their results are the same
     assert res_sklearn.shape[0] == res_double.shape[0]
     assert res_sklearn.shape[1] == res_double.shape[1]
+
     assert all(res_double == res_sklearn)
 
 
