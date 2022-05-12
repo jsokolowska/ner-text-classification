@@ -10,6 +10,7 @@ from typing import Iterable, Dict
 import numpy as np
 import pandas as pd
 import contractions
+import logging
 
 from .ner_classifier import NamedEntityClassifier
 
@@ -57,6 +58,7 @@ class NamedEntityVectorizer(ABC):
         self.feature_names = []
         self._text_getter = None
         self.n_iter = 10
+        self._log = logging.getLogger("Sample")
 
     @abstractmethod
     def fit(

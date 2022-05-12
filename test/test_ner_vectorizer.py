@@ -24,9 +24,12 @@ def test_input_validation_for_fit(tokenized, tags, raw):
     with pytest.raises(ValueError):
         vect.fit(tokenized=tokenized, bio_tags=tags, raw_documents=raw)
 
+
 """
 For text containing no named entities named entity vectorizer should give the same results as tf-idf vectorizer that does not used NE info (sklearn implementation).
 """
+
+
 def test_equality_to_sklearn():
     # given ne classifier that returns no entities
     ner = MockNoNamedEntityClassifier()
@@ -38,18 +41,25 @@ def test_equality_to_sklearn():
         lorem.sentence(),
     ]
     # and vectorizer with params compliant with sklearn
-    double_vect = DoubleTfIdfVectorizer(ner_clf=ner)
+    double_vect = DoubleTfIdfVectorizer(ner_clf=ner, min_df=1,
+        max_df=20)
     # and sklearn tfidf vectorizer
     tfidf_vect = TfidfVectorizer(
         analyzer="word",
         tokenizer=double_vect.build_preprocessor_and_tokenizer(),
         token_pattern=None,
+        min_df=1,
+        max_df=20
     )
     # log input text
     print(raw_documents)
 
     # then when both vectorizer are run
-    res_double = double_vect.fit_transform(raw_documents)
+    res_double = pd.DataFrame(
+        double_vect.fit_transform(raw_documents).toarray(),
+        columns=double_vect.get_feature_names(),
+    )
+
     res_sklearn = pd.DataFrame(
         tfidf_vect.fit_transform(raw_documents).toarray(),
         columns=tfidf_vect.get_feature_names(),
@@ -61,7 +71,7 @@ def test_equality_to_sklearn():
 
     # all vectors are normalized
     for idx, row in res_double.iterrows():
-        sum = (row**2).sum()
+        sum = (row ** 2).sum()
         assert np.isclose(sum, 1.0)
 
     # their results are the same
@@ -82,8 +92,10 @@ def test_fit_transform_equal_to_fit_and_transform():
         lorem.sentence(),
     ]
     # and two vectorizers
-    vect1 = DoubleTfIdfVectorizer(ner_clf=ner)
-    vect2 = DoubleTfIdfVectorizer(ner_clf=ner)
+    vect1 = DoubleTfIdfVectorizer(ner_clf=ner, min_df=1,
+        max_df=20)
+    vect2 = DoubleTfIdfVectorizer(ner_clf=ner, min_df=1,
+        max_df=20)
 
     # log input text
     print(raw_documents)
@@ -97,7 +109,8 @@ def test_fit_transform_equal_to_fit_and_transform():
     # their results are the same
     assert res1.shape[0] == res2.shape[0]
     assert res1.shape[1] == res2.shape[1]
-    assert all(res1 == res2)
+
+    assert np.sum(res1 != res2) == 0
 
 
 def test_build_preprocessor_and_tokenizer():
@@ -112,21 +125,29 @@ def test_build_preprocessor_and_tokenizer():
     ]
     # and vectorizer with params compliant with sklearn
     double_vect = DoubleTfIdfVectorizer(
-        ner_clf=ner, preprocessor=text_preprocessing, token_filter=token_filter
+        ner_clf=ner, preprocessor=text_preprocessing, token_filter=token_filter, min_df=1,
+        max_df=20
     )
     # and sklearn tfidf vectorizer with custom preprocesor
     tfidf_vect = TfidfVectorizer(
         analyzer="word",
         tokenizer=double_vect.build_preprocessor_and_tokenizer(),
         token_pattern=None,
+        min_df=1,
+        max_df=20
     )
 
     # then when both vectorizer are run
-    res_double = double_vect.fit_transform(raw_documents)
+    res_double = pd.DataFrame(
+        double_vect.fit_transform(raw_documents).toarray(),
+        columns=double_vect.get_feature_names(),
+    )
     res_sklearn = pd.DataFrame(
         tfidf_vect.fit_transform(raw_documents).toarray(),
         columns=tfidf_vect.get_feature_names(),
     )
 
     # resulting tokenization is identical
-    assert all(res_double.columns == res_sklearn.columns)
+    assert len(res_double.columns) == len(res_sklearn.columns)
+    for e1, e2 in zip(sorted(res_double.columns),sorted(res_sklearn.columns)):
+        assert e1 == e2

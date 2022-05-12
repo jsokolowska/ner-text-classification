@@ -1,13 +1,17 @@
-from src.representations import SpacyNEClassifier, DoubleTfIdfVectorizer
 from common import *
 import pandas as pd
 from datetime import datetime
-from src.representations.preprocessing import *
 from tqdm import tqdm
+from scipy.sparse import save_npz
 
 
-def load_train(data: Dataset):
-    return pd.read_csv(DATA_DIR + data.value + "\\" + State.RAW.value + "\\train.csv", nrows=400)
+def load(data: Dataset, state: State, name):
+    return pd.read_csv(DATA_DIR + data.value + "\\" + state.value + "\\" + name + ".csv")
+
+
+def save_df(df, dataset, state, name):
+    df_path = DATA_DIR + dataset.value + "/" + state.value + "/" + name + ".csv"
+    df.to_csv(df_path, index=False)
 
 
 def time():
@@ -15,26 +19,29 @@ def time():
     current_time = now.strftime("%H:%M:%S")
     return current_time
 
-
 if __name__ == "__main__":
+
+
+     # ag news bio train & test
+     # ag news std train & test (diff feature sizes?)
+     # all ag news smaller than raw?
+
+     # disasters - std sus
+     #bbc - std sus
+     # fine foods std sus
+     # todo redo bio vectorizer keys :/
+
+     #todo
+     # - redo bio vectorizer keys
+     # - look and test fit, fit transform and transform methods
+     # - Test wtf with std (???)
+
     print(f"Start time: {time()}")
     for d in tqdm(Dataset):
-        train = load_train(d)
-        ner = SpacyNEClassifier()
-        vectorizer = DoubleTfIdfVectorizer(
-            ner_clf=ner,
-            preprocessor=text_preprocessing,
-            token_filter=token_filter,
-            min_df=0,
-            max_df=1.0,
-        )
+        for state in tqdm(State):
+            df = load(d, state, "train")
+            print(f"[{time()}] {d.value} - {state.value} train: {df.shape}")
 
-        res = vectorizer.fit_transform(
-            train['text']
-        )
-
-        col = res.columns.values
-        print(res.columns)
-        a = 2
-
+            df = load(d, state, "test")
+            print(f"[{time()}] {d.value} - {state.value} test: {df.shape}")
 

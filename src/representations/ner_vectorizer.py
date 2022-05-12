@@ -12,8 +12,10 @@ from typing import Callable, Iterable, Dict, Tuple
 from nltk.corpus import stopwords, wordnet
 import pandas as pd
 from collections import defaultdict
-from scipy.sparse import dok_matrix
-#from guppy import hpy
+from scipy.sparse import dok_matrix, spmatrix
+from sklearn.preprocessing import normalize as sklearn_norm
+import logging
+
 
 __all__ = ["DoubleTfIdfVectorizer", "NamedEntityVectorizer", "BioTfIdfVectorizer"]
 
@@ -57,14 +59,15 @@ class NamedEntityVectorizer(ABC):
         self._df = None
         self._STOPWORDS = stopwords
         self._feature_names = []
-        self._use_idf = None
+        self._use_idf = True
         self.__lemmatizer = WordNetLemmatizer()
-        self.tfidf = None
-        self.feature_counts = defaultdict()
-        self.feature_counts.default_factory = lambda: 0
-        self.feature_idx = defaultdict()
-        self.feature_idx.default_factory = self.feature_idx.__len__
-        self.doc_num = 0
+        self._tfidf = None
+        self._feature_counts = defaultdict()
+        self._feature_counts.default_factory = lambda: 0
+        self._feature_idx = defaultdict()
+        self._feature_idx.default_factory = self._feature_idx.__len__
+        self._doc_num = 0
+        self._log = logging.getLogger("Ha")
 
     @abstractmethod
     def fit(
@@ -82,7 +85,7 @@ class NamedEntityVectorizer(ABC):
             tokenized: pd.Series = None,
             tags: pd.Series = None,
             use_idf: bool = True,
-    ) -> pd.DataFrame:
+    ) -> spmatrix:
         pass
 
     @abstractmethod
@@ -92,7 +95,7 @@ class NamedEntityVectorizer(ABC):
             tokenized: pd.Series = None,
             tags: pd.Series = None,
             use_idf: bool = True,
-    ) -> pd.DataFrame:
+    ) -> spmatrix:
         pass
 
     def get_params(self) -> Dict[str, any]:
@@ -107,6 +110,9 @@ class NamedEntityVectorizer(ABC):
             ):
                 params[name] = value
         return params
+
+    def get_feature_names(self):
+        return self._feature_names
 
     def _check_params(
             self, raw_documents: Iterable[str], tokenized: pd.Series, tags: pd.Series
@@ -169,17 +175,19 @@ class NamedEntityVectorizer(ABC):
             keys = self._get_tokens(tokens, tags)
 
             for k in keys:
-                self.feature_counts[k] += 1
+                self._feature_counts[k] += 1
 
         lower_bound = self.min_df
         upper_bound = self.max_df
         if isinstance(self.min_df, float):
-            lower_bound *= self.doc_num
+            lower_bound *= self._doc_num
         if isinstance(self.max_df, float):
-            upper_bound *= self.doc_num
+            upper_bound *= self._doc_num
 
-        self.feature_counts = {k: v for k, v in self.feature_counts.items() if upper_bound >= v >= lower_bound}
-        self._idf = pd.Series(data=self.feature_counts.values(), index=self.feature_counts.keys())
+        self._feature_counts = {k: v for k, v in self._feature_counts.items() if upper_bound >= v >= lower_bound}
+        self._idf = pd.Series(data=self._feature_counts.values(), index=self._feature_counts.keys())
+        self._log.error(f"idf shape = {self._idf.shape}")
+        self._log.error(f"Feature counts = {self._feature_counts}")
 
     @abstractmethod
     def _get_tokens(self, words: [str], tags: [str]) -> [str]:
@@ -228,52 +236,53 @@ class NamedEntityVectorizer(ABC):
         tokenizer = Tokenizer(nlp.vocab)
         return tokenize_and_preprocess
 
-    def _calculate_tf_idf(self):
-        if self._use_idf:
-            self._calculate_tfidf()
-        else:
-            self._calculate_tf()
-
-    def _calculate_tfidf(self):
-        self._calculate_tf()
-        self.tfidf = self.tfidf.multiply(self._idf, axis=1)
-
     def _narrow_down_vocab(self):
         lower_bound = self.min_df
         upper_bound = self.max_df
         if isinstance(self.min_df, float):
-            lower_bound *= self.doc_num
+            lower_bound *= self._doc_num
         if isinstance(self.max_df, float):
-            upper_bound *= self.doc_num
+            upper_bound *= self._doc_num
 
         self._idf = self._token_count.where(
             lambda x: [upper_bound >= item >= lower_bound for item in x]
         ).dropna()
 
     def _invert(self):
-        self._idf = np.log((1 + self.doc_num) / (1 + self._idf)) + 1
+        self._idf = np.log((1 + self._doc_num) / (1 + self._idf)) + 1
 
-    def _calculate_tf(self):
+    def _calculate_tf_idf(self):
         self._idf = self._idf
         self._group()
-
-        tfidf = dok_matrix((len(self._df), len(self._idf.index.values.tolist())))
+        shape = (len(self._df), len(self._idf.index.values.tolist()))
+        tfidf = dok_matrix(shape)
+        self._log.error(f"Starting shape of sparse array = {shape}")
 
         for idx, row in self._df.iterrows():
             tokens, tags = self.filter_tokens_sent(row['tokens'], row['tags'])
             terms = self._get_tokens(tokens, tags)
             tf = pd.Series(terms).value_counts()
             tf = tf / len(row["tokens"])
+
             for word, tf_val in tf.iteritems():
-                if word in self.feature_counts:
-                    col_idx = self.feature_idx[word]
+                if word in self._feature_counts:
+                    col_idx = self._feature_idx[word]
+                    if self._use_idf:
+                        idf = self._idf[word]
+                        tf_val = tf_val / idf
                     tfidf[idx, col_idx] = tf_val
-        self.feature_names = [*self.feature_idx.keys()]
-        self.tfidf = pd.DataFrame(tfidf.toarray(), columns=self.feature_names)
+
+        self._feature_names = [*self._feature_idx.keys()]
+        self._log.error(f"End shape of sparse array = {tfidf.shape}")
+        self._log.error(tfidf.values())
+        if self.normalize:
+            tfidf = sklearn_norm(tfidf)
+        self._tfidf = tfidf
 
     """
     filter and preprocess tokens for given input document
     """
+
     def filter_tokens_sent(self, tokens, tags):
         if self.lemmatize:
             tokens, tags = self._lemmatize(tokens, tags)
@@ -318,11 +327,11 @@ def get_wnet_tag(tag):
         return wordnet.NOUN
 
 
-def _normalize(tfidf: pd.DataFrame) -> pd.DataFrame:
-    squared = tfidf ** 2
-    norms = np.sqrt(squared.sum(axis=1))
-    norms[norms == 0] = 1  # prevent zero division
-    return tfidf.div(norms, axis=0)
+def _strip_prefix_if_bio_tag(tag: str):
+    if tag.startswith("B-") or tag.startswith("I-"):
+        return tag[2:]
+    else:
+        return tag
 
 
 def _validate_params(raw_documents, tokenized, bio_tags):
@@ -345,7 +354,6 @@ def _validate_params(raw_documents, tokenized, bio_tags):
                 raise ValueError(
                     f"Token list and tag list for each sentence must be the same length. {token_list} and {bio_list} are not equal"
                 )
-
 
     if bio_tags is not None:
         _validate_bio_tags(bio_tags)
@@ -447,19 +455,18 @@ class DoubleTfIdfVectorizer(NamedEntityVectorizer):
         :param tokenized: pd.Series, containing lists of strings (tokens)
         :param bio_tags: pd.Series, containing lists of enitity tags, this uses BIO tagging schema, assuming 'O' to mean
         no named entity is present
-        :param n_iter
-        Number of iterations to pass to ner_classifier if tune_classifier was set to true
         :returns fitted vectorizer
         """
         _validate_params(raw_documents, tokenized, bio_tags)
         if raw_documents is not None:
-            self.doc_num = len(raw_documents)
+            self._doc_num = len(raw_documents)
             preprocessed = self._preprocess(raw_documents)
             self._tag(preprocessed)
         else:
             self._df = pd.DataFrame({"tokens": tokenized, "tags": bio_tags})
-            self.doc_num = len(tokenized)
-        self._calculate_idf()
+            self._doc_num = len(tokenized)
+        if self._use_idf:
+            self._calculate_idf()
         return self
 
     def get_idf(self):
@@ -471,21 +478,11 @@ class DoubleTfIdfVectorizer(NamedEntityVectorizer):
             tokenized: pd.Series = None,
             bio_tags: pd.Series = None,
             use_idf=True,
-    ) -> pd.DataFrame:
+    ) -> spmatrix:
         self._use_idf = use_idf
-        _validate_params(raw_documents, tokenized, bio_tags)
-        if raw_documents is not None:
-            self.doc_num = len(raw_documents)
-            preprocessed = self._preprocess(raw_documents)
-            self._tag(preprocessed)
-        else:
-            self._df = pd.DataFrame({"tokens": tokenized, "tags": bio_tags})
-            self.doc_num = len(tokenized)
-        self._calculate_idf()
+        self.fit(raw_documents, tokenized, bio_tags)
         self._calculate_tf_idf()
-        if self.normalize:
-            self.tfidf = _normalize(self.tfidf)
-        return self.tfidf
+        return self._tfidf
 
     def transform(
             self,
@@ -493,7 +490,7 @@ class DoubleTfIdfVectorizer(NamedEntityVectorizer):
             tokenized: pd.Series = None,
             bio_tags: pd.Series = None,
             use_idf: bool = True,
-    ) -> pd.DataFrame:
+    ) -> spmatrix:
         self._use_idf = use_idf
         if not self._is_fitted():
             raise ValueError("Vectorizer not fitted")
@@ -501,20 +498,13 @@ class DoubleTfIdfVectorizer(NamedEntityVectorizer):
         if raw_documents is not None:
             preprocessed = self._preprocess(raw_documents)
             self._tag(preprocessed)
-            self.doc_num = len(raw_documents)
+            self._doc_num = len(raw_documents)
         else:
             self._df = pd.DataFrame({"tokens": tokenized, "tags": bio_tags})
-            self.doc_num = len(tokenized)
+            self._doc_num = len(tokenized)
 
         self._calculate_tf_idf()
-        if self.normalize:
-            self.tfidf = _normalize(self.tfidf)
-        return self.tfidf
-
-    def tag_only(self, raw_documents: Iterable[str]):
-        preprocessed = self._preprocess(raw_documents)
-        self._tag(preprocessed)
-        return self._df
+        return self._tfidf
 
     def _get_tokens(self, words: [str], tags: [str]) -> [str]:
         final_tokens = []
@@ -530,9 +520,7 @@ class BioTfIdfVectorizer(DoubleTfIdfVectorizer):
     def _get_tokens(self, words: [str], tags: [str]) -> [str]:
         final_tokens = []
         for w, t in zip(words, tags):
-            if t == "O":
-                final_tokens.append(w)
-            else:
-                final_tokens.append(w)
-                final_tokens.append(w + "_" + t)
+            final_tokens.append(w)
+            if t != "O":
+                final_tokens.append(_strip_prefix_if_bio_tag(t))
         return final_tokens
