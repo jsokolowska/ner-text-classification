@@ -2,8 +2,7 @@ import pandas as pd
 from tqdm import tqdm
 
 from src.representations.preprocessing import *
-from src.scripts.common import *
-from sklearn.feature_extraction.text import TfidfVectorizer
+from src.scripts.util.common import *
 
 from src.representations import (
     DoubleTfIdfVectorizer,

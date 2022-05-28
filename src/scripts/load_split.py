@@ -5,7 +5,7 @@ import numpy as np
 import os
 from sklearn.model_selection import train_test_split
 
-from src.scripts.common import *
+from src.scripts.util.common import *
 
 SEED = 1289
 TEST_PERCENT = 0.2

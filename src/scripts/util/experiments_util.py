@@ -1,5 +1,5 @@
-__all__ = ["CLASS_LABELS", "KnnParams", "RandomForestParams", "SVCParams", "LogisticRegression", "ClassifierParams",
-           "STATE_LABELS", "DATASET_LABELS", "save_score_dfs", "get_plot_path"]
+__all__ = ["CLASS_LABELS", "KnnParams", "RandomForestParams", "SVCParams", "LogisticRegressionParams",
+           "STATE_LABELS", "DATASET_LABELS", "save_score_dfs", "get_plot_path", "plt_clear", "RESULTS_DIR"]
 
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
@@ -8,7 +8,7 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
-from src.scripts.common import Dataset, State
+from src.scripts.util.common import Dataset, State
 import matplotlib.pyplot as plt
 
 SEED = 12890
@@ -19,13 +19,11 @@ CLASS_LABELS = {
     Dataset.BBC: {0: 'politics', 1: 'tech', 2: 'entertainment', 3: 'sport', 4: 'business'},
     Dataset.FINE_FOODS: {5: '5*', 4: '4*', 1: '1*', 3: '3*', 2: '2*'}
 }
-
 STATE_LABELS = {
     State.STD: "Standard",
     State.BIO: "BIO",
     State.DOUBLE: "Double"
 }
-
 DATASET_LABELS = {
     Dataset.AG_NEWS: "Ag's news",
     Dataset.IMDB: "IMDB",
@@ -42,7 +40,7 @@ class ClassifierParams:
         self.default_params = {}
         self.param_override = {}
 
-    def _get_params(self, dataset: Dataset, state: State) -> dict:
+    def get_params(self, dataset: Dataset, state: State) -> dict:
         params = self.default_params[dataset]
         if dataset in self.param_override and state in self.param_override[dataset]:
             for key, item in self.param_override[dataset][state].items():
@@ -50,7 +48,7 @@ class ClassifierParams:
         return params
 
     def get_classifier(self, dataset: Dataset, state: State):
-        params = {'clf__' + k: v for k, v in self._get_params(dataset, state).items()}
+        params = {'clf__' + k: v for k, v in self.get_params(dataset, state).items()}
         pipe = Pipeline([("std", StandardScaler()), ("clf", self._clf_class())])
         pipe.set_params(**params)
         return pipe
@@ -201,12 +199,12 @@ class SVCParams(ClassifierParams):
         }
         self.param_override = {
             Dataset.DISASTERS: {
-                State.STD: {
+                State.DOUBLE: {
                     'kernel': 'rbf',
                     'gamma': 'auto',
                     'C': 0.01,
                 },
-                State.DOUBLE: {
+                State.STD: {
                     'kernel': 'rbf',
                     'gamma': 'scale',
                     'C': 0.1,
@@ -229,16 +227,16 @@ class SVCParams(ClassifierParams):
 
 
 # scores util
-_RESULTS_DIR = "C:\\Users\\Asia\\Documents\\Projekty\\PyCharm Projects\\text-classification\\results"
+RESULTS_DIR = "/results\\"
 
 
 def save_score_dfs(clf_name, roc_auc_df, avg_pr_df):
-    roc_auc_df.to_csv(f"{_RESULTS_DIR}/{clf_name}-roc_auc.csv", index=False)
-    avg_pr_df.to_csv(f"{_RESULTS_DIR}/{clf_name}_acg_pr.csv", index=False)
+    roc_auc_df.to_csv(f"{RESULTS_DIR}/{clf_name}-roc_auc.csv", index=False)
+    avg_pr_df.to_csv(f"{RESULTS_DIR}/{clf_name}_acg_pr.csv", index=False)
 
 
 def get_plot_path(clf_name, dataset, state):
-    return f"{_RESULTS_DIR}/{clf_name}-{dataset.value}-{state.value}.png"
+    return f"{RESULTS_DIR}/{clf_name}-{dataset.value}-{state.value}.png"
 
 
 def plt_clear():
@@ -256,7 +254,6 @@ def makro_roc_auc_curve(y_test, y_score, n_classes):
         fpr[i], tpr[i], _ = roc_curve(y_test[:, i], y_score[:, i])
         roc_auc[i] = auc(fpr[i], tpr[i])
 
-    fpr_avg = sum(fpr.values())/n_classes
-    tpr_avg = sum(tpr.values())/ n_classes
+    fpr_avg = sum(fpr.values()) / n_classes
+    tpr_avg = sum(tpr.values()) / n_classes
     roc_auc_avg = sum(roc_auc.values()) / n_classes
-

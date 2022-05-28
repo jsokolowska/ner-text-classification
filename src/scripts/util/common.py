@@ -4,7 +4,7 @@ from scipy.sparse import save_npz, load_npz
 import os
 
 __all__ = ["Dataset", "DATA_DIR", "State", "TEXT_COL", "TARGET_COL", "save_as_npz", "validate_or_save_columns",
-           "read_as_dataframe", "get_train_test"]
+           "read_as_dataframe", "get_train_test", "load_test", "df_to_latex", "load_raw"]
 
 from sklearn.utils import shuffle
 
@@ -25,8 +25,8 @@ class State(Enum):
 
 
 TEXT_COL = "text"
-TARGET_COL = "target"
-DATA_DIR = "C:/Users/Asia/Documents/Projekty/PyCharm Projects/text-classification/data/"
+TARGET_COL = "TARGET"
+DATA_DIR = "/data/"
 SEED = 19178
 
 
@@ -81,3 +81,34 @@ def get_train_test(dataset, state):
     X_test = df_test.drop(TARGET_COL, axis=1)
     y_test = df_test[TARGET_COL]
     return X_train, y_train, X_test, y_test
+
+
+def load_test(dataset: Dataset, state: State) -> pd.DataFrame:
+    df_test = read_as_dataframe(dataset, state, "test")
+    df_test = shuffle(df_test, random_state=SEED)
+    if dataset == Dataset.DISASTERS:
+        df_test = df_test.drop(df_test[df_test[TARGET_COL] == "Can't Decide"].index)
+    X_test = df_test.drop(TARGET_COL, axis=1)
+    y_test = df_test[TARGET_COL]
+    return X_test, y_test
+
+def df_to_latex (df: pd.DataFrame, label:str, caption):
+    latex = "\\begin{table}[!h] \label{" +label+ "} \centering\n" \
+            "\caption{" + caption + "}" \
+            "\\begin{tabular}{"
+    cols = df.columns.tolist()
+    latex += '| c ' * (len(cols) + 1)
+    latex += '|}\hline \n'
+    latex += "Zbiór danych & " + " & ".join(cols)  + "\\\\ \hline \n"
+
+    for index,row in df.iterrows():
+        latex += str(index) + " & "
+        for c in cols:
+            latex +=  "{0:.4f}".format(row[c]) + " & "
+        latex = latex[:-2]  #delete last &
+        latex += "\\\\ \hline\n"
+
+    latex += "\end{tabular}\n\end{table}\n"
+    return latex
+
+
