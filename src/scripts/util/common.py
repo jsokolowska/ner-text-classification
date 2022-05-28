@@ -26,7 +26,7 @@ class State(Enum):
 
 TEXT_COL = "text"
 TARGET_COL = "TARGET"
-DATA_DIR = "/data/"
+DATA_DIR = "C:\\Users\\Asia\\Documents\\Projekty\\PyCharm Projects\\text-classification\\data\\"
 SEED = 19178
 
 
@@ -104,7 +104,7 @@ def df_to_latex (df: pd.DataFrame, label:str, caption):
     for index,row in df.iterrows():
         latex += str(index) + " & "
         for c in cols:
-            latex +=  "{0:.4f}".format(row[c]) + " & "
+            latex +=  "{0:.2f}".format(row[c]) + " & "
         latex = latex[:-2]  #delete last &
         latex += "\\\\ \hline\n"
 

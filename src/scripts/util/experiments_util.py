@@ -169,31 +169,36 @@ class SVCParams(ClassifierParams):
                 'kernel': 'sigmoid',
                 'gamma': 'scale',
                 'C': 0.01,
-                'random_state': SEED
+                'random_state': SEED,
+                'class_weight': 'balanced'
             },
             Dataset.FINE_FOODS: {
                 'kernel': 'sigmoid',
                 'gamma': 'scale',
                 'C': 0.01,
-                'random_state': SEED
+                'random_state': SEED,
+                'class_weight': 'balanced'
             },
             Dataset.IMDB: {
                 'kernel': 'sigmoid',
                 'gamma': 'scale',
                 'C': 0.01,
-                'random_state': SEED
+                'random_state': SEED,
+                'class_weight': 'balanced'
             },
             Dataset.BBC: {
                 'kernel': 'sigmoid',
                 'gamma': 0.01,
                 'C': 0.01,
-                'random_state': SEED
+                'random_state': SEED,
+                'class_weight': 'balanced'
             },
             Dataset.DISASTERS: {
                 'kernel': 'sigmoid',
                 'gamma': 'auto',
                 'C': 0.1,
-                'random_state': SEED
+                'random_state': SEED,
+                'class_weight': 'balanced'
             }
 
         }
@@ -244,16 +249,3 @@ def plt_clear():
     plt.close()
     plt.cla()
     plt.clf()
-
-
-def makro_roc_auc_curve(y_test, y_score, n_classes):
-    fpr = dict()
-    tpr = dict()
-    roc_auc = dict()
-    for i in range(n_classes):
-        fpr[i], tpr[i], _ = roc_curve(y_test[:, i], y_score[:, i])
-        roc_auc[i] = auc(fpr[i], tpr[i])
-
-    fpr_avg = sum(fpr.values()) / n_classes
-    tpr_avg = sum(tpr.values()) / n_classes
-    roc_auc_avg = sum(roc_auc.values()) / n_classes
