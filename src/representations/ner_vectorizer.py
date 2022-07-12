@@ -1,7 +1,9 @@
+import logging
 from abc import ABC, abstractmethod
 
 import contractions
 import numpy as np
+import string
 from nltk import WordNetLemmatizer, pos_tag
 from spacy.lang.en import English
 from spacy.tokenizer import Tokenizer
@@ -14,7 +16,6 @@ import pandas as pd
 from collections import defaultdict
 from scipy.sparse import dok_matrix, spmatrix
 from sklearn.preprocessing import normalize as sklearn_norm
-import logging
 
 
 __all__ = ["DoubleTfIdfVectorizer", "NamedEntityVectorizer", "BioTfIdfVectorizer"]
@@ -67,7 +68,6 @@ class NamedEntityVectorizer(ABC):
         self._feature_idx = defaultdict()
         self._feature_idx.default_factory = self._feature_idx.__len__
         self._doc_num = 0
-        self._log = logging.getLogger("Ha")
 
     @abstractmethod
     def fit(
@@ -172,8 +172,7 @@ class NamedEntityVectorizer(ABC):
         self._group()
         for _, row in self._df.iterrows():
             tokens, tags = self.filter_tokens_sent(row['tokens'], row['tags'])
-            keys = self._get_tokens(tokens, tags)
-
+            keys = set(self._get_tokens(tokens, tags))
             for k in keys:
                 self._feature_counts[k] += 1
 
@@ -186,8 +185,6 @@ class NamedEntityVectorizer(ABC):
 
         self._feature_counts = {k: v for k, v in self._feature_counts.items() if upper_bound >= v >= lower_bound}
         self._idf = pd.Series(data=self._feature_counts.values(), index=self._feature_counts.keys())
-        self._log.error(f"idf shape = {self._idf.shape}")
-        self._log.error(f"Feature counts = {self._feature_counts}")
 
     @abstractmethod
     def _get_tokens(self, words: [str], tags: [str]) -> [str]:
@@ -214,6 +211,8 @@ class NamedEntityVectorizer(ABC):
             pipe.add(lemmatize_no_tag)
         if self.lower:
             pipe.add(lambda lst: [t.lower() for t in lst])
+        if self.filter_punctuation:
+            pipe.add(lambda lst: self.filter_punctuation_fun(lst))
         if self.filter_stopwords:
             pipe.add(
                 lambda lst: [
@@ -223,6 +222,9 @@ class NamedEntityVectorizer(ABC):
         if self.token_filter:
             pipe.add(lambda lst: self.token_filter(lst, ["O" for _ in lst]))
         return preprocess_for_sklearn
+
+    def filter_punctuation_fun(self, input_lst):
+        return [t for t in input_lst if any([letter not in string.punctuation for letter in t])]
 
     def build_preprocessor_and_tokenizer(self):
         def tokenize_and_preprocess(sentence):
@@ -256,7 +258,6 @@ class NamedEntityVectorizer(ABC):
         self._group()
         shape = (len(self._df), len(self._idf.index.values.tolist()))
         tfidf = dok_matrix(shape)
-        self._log.error(f"Starting shape of sparse array = {shape}")
 
         for idx, row in self._df.iterrows():
             tokens, tags = self.filter_tokens_sent(row['tokens'], row['tags'])
@@ -273,8 +274,6 @@ class NamedEntityVectorizer(ABC):
                     tfidf[idx, col_idx] = tf_val
 
         self._feature_names = [*self._feature_idx.keys()]
-        self._log.error(f"End shape of sparse array = {tfidf.shape}")
-        self._log.error(tfidf.values())
         if self.normalize:
             tfidf = sklearn_norm(tfidf)
         self._tfidf = tfidf
@@ -288,6 +287,8 @@ class NamedEntityVectorizer(ABC):
             tokens, tags = self._lemmatize(tokens, tags)
         if self.lower:
             tokens = [word.lower() for word in tokens]
+        if self.filter_punctuation:
+            tokens = self.filter_punctuation_fun(tokens)
         if self.filter_stopwords:
             filtered_tokens = []
             filtered_tags = []

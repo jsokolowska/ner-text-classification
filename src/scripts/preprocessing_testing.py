@@ -1,46 +1,76 @@
-from src.scripts.util.common import *
+from src.representations import DoubleTfIdfVectorizer, SpacyNEClassifier, BioTfIdfVectorizer
+from sklearn.feature_extraction.text import TfidfVectorizer
 import pandas as pd
-from datetime import datetime
-from tqdm import tqdm
-
-
-def load(data: Dataset, state: State, name):
-    return pd.read_csv(DATA_DIR + data.value + "\\" + state.value + "\\" + name + ".csv")
-
-
-def save_df(df, dataset, state, name):
-    df_path = DATA_DIR + dataset.value + "/" + state.value + "/" + name + ".csv"
-    df.to_csv(df_path, index=False)
-
-
-def time():
-    now = datetime.now()
-    current_time = now.strftime("%H:%M:%S")
-    return current_time
-
 if __name__ == "__main__":
+    t3 = "He has worked in Mexico and Uruguay."
+    t4 = "He is the UK Independence Party's weapon"
+    t2 = "Rick Morris is a winner."
+    t1 = "UKIP's secret weapon?"
+    texts = [t2, t4]
+    docs = [
+        ["Rick", "Morris", "attends", "every", "party", "."],
+        ["He", "is", "the", "UK", "Independence", "Party", "'s", "weapon", "."]
+    ]
+    tags = [
+        ["B-PERSON", "I-PERSON", "O", "O", "O", "O"],
+        ["O", "O", "O", "B-GPE", "B-NORP", "I-NORP", "I-NORP", "O", "O"]
+    ]
+    ner = SpacyNEClassifier()
+    vect = DoubleTfIdfVectorizer(ner,
+                              filter_stopwords=False,
+                              filter_punctuation=True,
+                              lemmatize=False,
+                              normalize=False,
+                              fix_contractions=False)
+
+    df = pd.DataFrame(vect.fit_transform(tokenized=pd.Series(docs), bio_tags=pd.Series(tags)).toarray(),
+                      columns=vect.get_feature_names())
 
 
-     # ag news bio train & test
-     # ag news std train & test (diff feature sizes?)
-     # all ag news smaller than raw?
+    def df_to_latex(df: pd.DataFrame, label: str, caption):
+        latex = "\\begin{table}[!h] \label{" + label + "} \centering\n" \
+                                                       "\caption{" + caption + "}" \
+                                                                               "\\begin{tabular}{"
+        headers = ['Dokument 1', 'Dokument 2']
+        latex += '| c ' * (len(headers) + 1)
+        latex += '|}\hline \n'
+        latex += "Tokeny & " + " & ".join(headers) + "\\\\ \hline \n"
 
-     # disasters - std sus
-     #bbc - std sus
-     # fine foods std sus
-     # todo redo bio vectorizer keys :/
+        cols = [c for c in df.columns]
+        cols.sort()
+        for col in cols:
+            col_latex_safe = col.replace("_", "\\textunderscore ")
+            latex += col_latex_safe + "&"
+            for h_idx in range(len(headers)):
+                latex += "{0:.3f}".format(df.iloc[h_idx].loc[col]) + " & "
+            latex = latex[:-2]  # delete last &
+            latex += "\\\\ \hline\n"
 
-     #todo
-     # - redo bio vectorizer keys
-     # - look and test fit, fit transform and transform methods
-     # - Test wtf with std (???)
+        latex += "\end{tabular}\n\end{table}\n"
+        return latex
 
-    print(f"Start time: {time()}")
-    for d in tqdm(Dataset):
-        for state in tqdm(State):
-            df = load(d, state, "train")
-            print(f"[{time()}] {d.value} - {state.value} train: {df.shape}")
+    print(df_to_latex(df, "tab:tfidf-double", "Wartości TF-IDF dla reprezentacji Double"))
 
-            df = load(d, state, "test")
-            print(f"[{time()}] {d.value} - {state.value} test: {df.shape}")
+    vect = BioTfIdfVectorizer(ner,
+                                 filter_stopwords=False,
+                                 filter_punctuation=True,
+                                 lemmatize=False,
+                                 normalize=False,
+                                 fix_contractions=False)
 
+    df = pd.DataFrame(vect.fit_transform(tokenized=pd.Series(docs), bio_tags=pd.Series(tags)).toarray(),
+                      columns=vect.get_feature_names())
+    print(df_to_latex(df, "tab:tfidf-bio", "Wartości TF-IDF dla reprezentacji BIO"))
+
+    tfidf = TfidfVectorizer(
+        analyzer='word',
+        tokenizer=lambda x: x,
+        preprocessor=vect.build_preprocessor_and_tokenizer(),
+        min_df=1, max_df=1.0,
+        token_pattern=None)
+    docs_r = [" ".join(d) for d in docs
+
+    ]
+
+    df = pd.DataFrame(tfidf.fit_transform(docs_r).toarray(), columns =tfidf.get_feature_names())
+    print(df_to_latex(df, "tab:tfidf-std", "Wartości TF-IDF bez modyfikacji"))
